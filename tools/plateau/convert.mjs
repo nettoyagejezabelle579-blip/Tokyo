@@ -2,7 +2,7 @@
 // Game frame: origin = crossing street level, X = east, Y = up, Z = south (metres).
 import fs from 'node:fs';
 import path from 'node:path';
-import { NodeIO } from '@gltf-transform/core';
+import { NodeIO, PropertyType } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { draco, prune, dedup } from '@gltf-transform/functions';
 import draco3d from 'draco3dgltf';
@@ -12,6 +12,7 @@ const SRC = process.argv[2], OUT = process.argv[3], ONLY = (process.env.ONLY || 
 const LAT0 = 35.6595 * Math.PI / 180, LON0 = 139.70052 * Math.PI / 180;
 const AOI = [-620, -680, 680, 720];
 const MAXTEX = +(process.env.MAXTEX || 1024);
+const HIRADIUS = +(process.env.HIRADIUS || 400);
 
 // WGS84
 const A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F);
@@ -155,21 +156,30 @@ async function convertSet(name, dir, ground, opts = {}) {
       tris += (p.getIndices() ? p.getIndices().getCount() : pos.getCount()) / 3;
     }
     for (const node of root.listNodes()) { node.setMatrix([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
-    // textures: shrink and re-encode as WebP
-    for (const tex of root.listTextures()) {
-      const img = tex.getImage(); if (!img) continue;
-      const s = sharp(Buffer.from(img)); const meta = await s.metadata();
-      const size = Math.min(MAXTEX, meta.width || MAXTEX);
-      const out = await s.resize(size, size, { fit: 'inside' }).webp({ quality: opts.q || 72 }).toBuffer();
-      tex.setImage(new Uint8Array(out)); tex.setMimeType('image/webp');
+    // textures: written next to the tiles as WebP files (lo 1024 px for everything, hi up to 4096 px near the
+    // crossing, streamed in by distance); the material keeps a 'tex:<k>' name pointing at its entry
+    const file = path.basename(l.uri).replace('.b3dm', '.glb');
+    const near = Math.hypot(Math.max(mn[0], Math.min(0, mx[0])), Math.max(mn[2], Math.min(0, mx[2]))) < HIRADIUS;
+    const texOut = [];
+    for (const mat of root.listMaterials()) {
+      const tex = mat.getBaseColorTexture(); const img = tex?.getImage(); if (!img) continue;
+      const k = texOut.length, base = `tex/${name}/${file.replace('.glb', '')}_${k}`;
+      fs.mkdirSync(path.join(OUT, 'tex', name), { recursive: true });
+      const meta = await sharp(Buffer.from(img)).metadata();
+      const w = meta.width || 1024;
+      await sharp(Buffer.from(img)).resize(Math.min(MAXTEX, w), Math.min(MAXTEX, w), { fit: 'inside' }).webp({ quality: 72 }).toFile(path.join(OUT, base + '_lo.webp'));
+      let hi = null;
+      if (near && name === 'bldg' && w > MAXTEX) { hi = base + '_hi.webp'; await sharp(Buffer.from(img)).resize(Math.min(4096, w), Math.min(4096, w), { fit: 'inside' }).webp({ quality: 80 }).toFile(path.join(OUT, hi)); }
+      texOut.push(hi ? { lo: base + '_lo.webp', hi } : { lo: base + '_lo.webp' });
+      mat.setName(`tex:${k}`); mat.setBaseColorTexture(null);
     }
     for (const m of root.listMaterials()) { m.setMetallicFactor(0); m.setRoughnessFactor(0.9); }
     if (opts.classes === 'tran') for (const mesh of root.listMeshes()) for (const q of mesh.listPrimitives()) if (q.getAttribute('TEXCOORD_0') === null) q.setAttribute('TEXCOORD_0', null);
-    await doc.transform(prune(), dedup(), draco({ quantizePosition: 14, quantizeNormal: 8, quantizeTexcoord: 12, quantizeColor: 8 }));
-    const file = path.basename(l.uri).replace('.b3dm', '.glb');
+    // keep UVs although no texture references them any more; never merge materials (names carry the texture)
+    await doc.transform(prune({ keepAttributes: true }), dedup({ propertyTypes: [PropertyType.ACCESSOR, PropertyType.MESH] }), draco({ quantizePosition: 14, quantizeNormal: 8, quantizeTexcoord: 14, quantizeColor: 8 }));
     await io.write(path.join(outDir, file), doc);
     const bytes = fs.statSync(path.join(outDir, file)).size;
-    index.push({ f: `${name}/${file}`, min: mn.map((v) => +v.toFixed(1)), max: mx.map((v) => +v.toFixed(1)), tris: Math.round(tris), kb: Math.round(bytes / 1024) });
+    index.push({ f: `${name}/${file}`, min: mn.map((v) => +v.toFixed(1)), max: mx.map((v) => +v.toFixed(1)), tris: Math.round(tris), kb: Math.round(bytes / 1024), ...(texOut.length ? { tex: texOut } : {}) });
     process.stdout.write(`${name}/${file} ${Math.round(bytes / 1024)}KB  `);
   }
   console.log(`\n${name}: ${index.length} files`);

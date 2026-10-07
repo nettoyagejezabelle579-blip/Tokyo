@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Phys } from './phys.js';
 import { City, CityPhys } from './city.js';
 import { buildDetails } from './details.js';
+import { buildStreet } from './street.js';
 import { Sky } from './sky.js';
 import { Rail } from './rail.js';
 import { Crowd } from './crowd.js';
@@ -56,6 +57,8 @@ async function boot(saved) {
   applyQuality();
   await city.loadGround();
   const details = buildDetails(scene, phys, city);
+  let street = null;
+  buildStreet(scene, city, new URL('../assets/plateau/frontage.json', import.meta.url).href).then((s) => (street = s)).catch((e) => console.warn('street layer', e));
   const cityPhys = new CityPhys(city, phys);
   const rail = new Rail(scene, details.boardSpots);
   const crowd = new Crowd(scene, mobile);
@@ -113,7 +116,7 @@ async function boot(saved) {
       tilePhys = tilePhys || new PM.TilePhys(pr);
       mode = 'photo';
       document.body.classList.add('photo');
-      city.root.visible = false; details.root.visible = false; sky.farGroup.visible = false; traffic.sigGroup.visible = false;
+      city.root.visible = false; details.root.visible = false; if (street) street.root.visible = false; sky.farGroup.visible = false; traffic.sigGroup.visible = false;
       player.phys = tilePhys; player.canFly = true;
       post.aoOn = false;
       hud.zoneOverride = (p) => {
@@ -127,7 +130,7 @@ async function boot(saved) {
       pr?.stop();
       mode = 'real';
       document.body.classList.remove('photo');
-      city.root.visible = true; details.root.visible = true; sky.farGroup.visible = true; traffic.sigGroup.visible = true;
+      city.root.visible = true; details.root.visible = true; if (street) street.root.visible = true; sky.farGroup.visible = true; traffic.sigGroup.visible = true;
       player.phys = cityPhys; player.fly = false; player.canFly = false;
       post.aoOn = true;
       $('attr').hidden = false; $('attr').innerHTML = realAttr; hud.zoneOverride = null; hud.zone = '';
@@ -231,6 +234,7 @@ async function boot(saved) {
     const t = now();
     const P = jst(t);
     player.update(dt);
+    if (mode === 'real') city.update(player.pos);
     sky.update(t, camera.position, dt, 0.35);
     const night = sky.night;
     if (mode === 'photo' && pr) {
@@ -243,6 +247,7 @@ async function boot(saved) {
     const photo = mode === 'photo' && pr;
     sky.dir.castShadow = renderer.shadowMap.enabled && night < 0.85;
     city.setNight(night);
+    street?.setNight(night);
     for (const m of details.platformMats) m.emissiveIntensity = night * 0.3;
     for (const m of details.lampMats) m.color.setScalar(0.75 + night * 0.5);
     for (const m of details.signMats) m.color.setScalar(0.85 - night * 0.1);

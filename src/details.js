@@ -112,6 +112,24 @@ export function buildDetails(scene, phys, city) {
   screen(11, -8.9, -29.25, 7, 13.5, 17, Math.atan2(0.107, 0.994));
   screen(23, 24.1, -21.85, 9, 7.5, 9.5, Math.atan2(-0.98, -0.2));
 
+  // ---------- landmark name signs ----------
+  {
+    const plaque = (text, x, z, y, w, h, ry, o) => {
+      const mat = new THREE.MeshBasicMaterial({ map: signTex(text, { w: Math.round(w * 64), h: Math.round(h * 64), ...o }), toneMapped: false });
+      D.signMats.push(mat);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.position.set(x, y, z); m.rotation.y = ry; root.add(m);
+    };
+    const qr = Math.atan2(0.107, 0.994);
+    plaque('QFRONT', -8.9, -29.2, 27.5, 9, 2.2, qr, { bg: '#111', fg: '#fff', weight: 900 });
+    plaque(['SHIBUYA TSUTAYA', 'Starbucks 2F'], -8.9, -29.3, 5.2, 12, 1.3, qr, { bg: '#0d2a6b', fg: '#fff' });
+    plaque('MAGNET by SHIBUYA109', 24.0, -21.9, 21, 10, 1.6, Math.atan2(-0.98, -0.2), { bg: '#f4f4f2', fg: '#1b1d21' });
+    // SHIBUYA109's cylinder: a curved name band near the top, facing the crossing
+    const tex = signTex('SHIBUYA109', { w: 1024, h: 160, bg: '#202024', fg: '#f2f2f2' });
+    const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.FrontSide }); D.signMats.push(mat);
+    const g = new THREE.CylinderGeometry(6.0, 6.0, 4.2, 40, 1, true, Math.PI / 2 - 1.1, 2.2);
+    const band = new THREE.Mesh(g, mat); band.position.set(-136.8, 40, -7.3); root.add(band);
+  }
+
   // ---------- Center Gai gate (street heads north-west from the Q-FRONT corner) ----------
   {
     const ux = -0.67, uz = -0.74, px = uz, pz = -ux; // street dir, across-street

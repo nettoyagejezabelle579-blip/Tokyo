@@ -25,6 +25,7 @@ async function getBuf(f) {
 export class City {
   constructor(scene, opts = {}) {
     this.lowTex = !!opts.lowTex; // phones: halve the facade photos (about 120 MB of GPU memory instead of 490)
+    this.texLoader = new THREE.TextureLoader(); this.hi = []; this.hiAt = 0;
     this.root = new THREE.Group(); this.root.name = 'plateau';
     scene.add(this.root);
     this.solid = []; // meshes used by physics
@@ -110,7 +111,7 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
     const worker = async () => {
       while (next < items.length) {
         const it = items[next++];
-        try { const g = await loader.parseAsync(await getBuf(it.f), BASE); this.add(it.set, g.scene); } catch (e) { console.warn('PLATEAU tile failed', it.f, e); }
+        try { const g = await loader.parseAsync(await getBuf(it.f), BASE); this.add(it.set, g.scene, it); } catch (e) { console.warn('PLATEAU tile failed', it.f, e); }
         this.loaded++; onProgress?.(this.loaded / this.total, it);
       }
     };
@@ -118,11 +119,13 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
     draco.dispose();
   }
 
-  add(set, scene) {
+  add(set, scene, it = {}) {
     const M = this.mats, meshes = [];
     scene.traverse((o) => { if (o.isMesh) meshes.push(o); });
     for (const o of meshes) {
-      const src = o.material, name = src?.name || '', map = src?.map || null;
+      const src = o.material, name = src?.name || '';
+      const entry = name.startsWith('tex:') ? it.tex?.[+name.slice(4)] : null;
+      const map = entry ? this.texture(entry.lo) : src?.map || null;
       let mat;
       if (set === 'tran') mat = M[name] || M.road;
       else if (set === 'frn') mat = map ? this.photo(map, false) : (M[name] || M.other);
@@ -130,11 +133,11 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
       else if (set === 'brid') mat = map ? this.photo(map, false) : M.bridge;
       else if (set === 'veg') mat = map ? this.photo(map, false, true) : M.leaf;
       else mat = M.plant;
+      if (entry?.hi) this.hi.push({ mat, lo: map, hiTex: null, url: entry.hi, state: 'lo', min: it.min, max: it.max });
       if (set === 'plant') { o.position.y += 0.03; }
       o.material = mat;
       o.castShadow = set === 'bldg' || set === 'brid' || set === 'veg' || (set === 'frn' && !/paint|tactile|manhole/.test(name));
       o.receiveShadow = true;
-      if (set === 'tran' || set === 'plant') o.userData.noAO = false;
       o.matrixAutoUpdate = false; o.updateMatrix();
       if (set !== 'veg' && set !== 'plant' && !(set === 'frn' && /paint|tactile|manhole/.test(name))) {
         o.geometry.boundsTree = new MeshBVH(o.geometry, { maxLeafTris: 12 });
@@ -145,14 +148,42 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
     this.root.add(scene);
   }
 
+  // Facade photos are plain WebP files (loaded like any image, so they work on hosts that block blob: images)
+  texture(file) {
+    const t = this.texLoader.load(BASE + file, (tex) => {
+      const img = tex.image;
+      if (this.lowTex && img && img.width > 512) {
+        const c = document.createElement('canvas'); c.width = img.width / 2; c.height = img.height / 2;
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        tex.image = c; tex.needsUpdate = true;
+      }
+    });
+    t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  }
+  // Full-resolution (4096 px) facades for the few blocks nearest the player; the rest stay at 1024 px
+  update(pos) {
+    const now = performance.now();
+    if (this.lowTex || now - this.hiAt < 800 || !this.hi.length) return;
+    this.hiAt = now;
+    const d = (e) => Math.hypot(Math.max(e.min[0] - pos.x, 0, pos.x - e.max[0]), Math.max(e.min[2] - pos.z, 0, pos.z - e.max[2]));
+    const order = this.hi.map((e) => [d(e), e]).sort((a, b) => a[0] - b[0]);
+    order.forEach(([dist, e], i) => {
+      const want = i < 5 && dist < 150 && pos.y < 300;
+      if (want && e.state === 'lo') {
+        e.state = 'loading';
+        e.hiTex = this.texLoader.load(BASE + e.url, (t) => { if (e.state === 'loading') { e.mat.map = t; e.mat.needsUpdate = true; e.state = 'hi'; } });
+        Object.assign(e.hiTex, { flipY: false, colorSpace: THREE.SRGBColorSpace, anisotropy: 8, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping });
+      } else if (!want && e.state !== 'lo' && (i >= 7 || dist > 220)) {
+        e.mat.map = e.lo; e.mat.needsUpdate = true; e.hiTex?.dispose(); e.hiTex = null; e.state = 'lo';
+      }
+    });
+  }
+
   photo(map, windows, cut) {
-    const img = map.image;
-    if (this.lowTex && img && img.width > 512) {
-      const c = document.createElement('canvas'); c.width = img.width / 2; c.height = img.height / 2;
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      img.close?.(); map.image = c; map.needsUpdate = true;
-    }
-    map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 8;
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.anisotropy = 8;
     // aerial facade photos come out cool and hazy: warm them slightly
     const m = new THREE.MeshStandardMaterial({ map, color: 0xfff1e2, roughness: windows ? 0.78 : 0.9, metalness: 0, emissive: 0x000000, alphaTest: cut ? 0.4 : 0, side: cut ? THREE.DoubleSide : THREE.FrontSide });
     if (windows) { this.nightify(m); m.emissive = new THREE.Color(0x000000); }
