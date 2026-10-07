@@ -12,6 +12,15 @@ import { rng } from './util.js';
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 const BASE = new URL('../assets/plateau/', import.meta.url).href;
 const ORDER = ['tran', 'brid', 'bldg', 'frn', 'veg', 'plant'];
+// binary files; hosts that only serve text get them as base64 '.txt'
+async function getBuf(f) {
+  const r = await fetch(BASE + f);
+  if (!r.ok) throw new Error(`${f}: ${r.status}`);
+  if (!f.endsWith('.txt')) return r.arrayBuffer();
+  const b = atob(await r.text()), u = new Uint8Array(b.length);
+  for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+  return u.buffer;
+}
 
 export class City {
   constructor(scene, opts = {}) {
@@ -59,20 +68,22 @@ float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); 
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 if (uNight > 0.01 && abs(vWN.y) < 0.35) {
   float u = abs(vWN.x) > abs(vWN.z) ? vWP.z : vWP.x;
-  vec2 g = vec2(u / 2.2, vWP.y / 3.5);
+  vec2 g = vec2(u / 1.7, vWP.y / 3.4);
   vec2 cell = floor(g), f = fract(g);
-  float pane = step(0.18, f.x) * step(f.x, 0.82) * step(0.3, f.y) * step(f.y, 0.85);
+  float pane = smoothstep(0.2, 0.3, f.x) * smoothstep(0.8, 0.7, f.x) * smoothstep(0.32, 0.4, f.y) * smoothstep(0.86, 0.78, f.y);
   float r = h21(cell + floor(vWP.xz / 37.0) * 7.0), r2 = h21(cell.yx + 3.1);
-  float shop = 1.0 - step(4.4, vWP.y);
-  float lit = shop > 0.5 ? step(0.35, r) : step(0.6, r);
-  float bright = shop > 0.5 ? 0.55 : (0.25 + 0.75 * r2);
+  float lit = step(0.66, r) * (0.3 + 0.7 * r2);
   // far away the panes are sub-pixel: use their average instead (no shimmering)
   float aa = clamp(1.6 - max(fwidth(g.x), fwidth(g.y)) * 3.0, 0.0, 1.0);
-  float win = mix((shop > 0.5 ? 0.65 : 0.4) * 0.38, lit * mix(pane, 1.0, shop * 0.5), aa);
-  vec3 warm = mix(vec3(1.0, 0.8, 0.55), vec3(0.8, 0.9, 1.0), step(0.7, r2));
-  float lum = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
-  float glass = smoothstep(0.62, 0.18, lum); // windows show where the facade photo is dark glass
-  totalEmissiveRadiance += uNight * warm * win * bright * (shop > 0.5 ? 0.9 : 0.55) * mix(0.25, 1.0, glass);
+  float win = mix(0.34 * 0.65 * 0.25, lit * pane, aa);
+  vec3 warm = mix(vec3(1.0, 0.82, 0.6), vec3(0.82, 0.9, 1.0), step(0.7, r2));
+  vec3 c = diffuseColor.rgb;
+  float lum = dot(c, vec3(0.3, 0.59, 0.11)), sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+  float glass = smoothstep(0.6, 0.15, lum); // office windows show where the facade photo is dark glass
+  float shop = 1.0 - smoothstep(3.6, 5.0, vWP.y);
+  // signs and storefronts baked into the photos light up in their own colours
+  vec3 sign = c * (smoothstep(0.12, 0.4, sat) * 2.2 + shop * 1.1);
+  totalEmissiveRadiance += uNight * (warm * win * 0.6 * mix(0.3, 1.0, glass) * (1.0 - shop) + sign * 0.55);
 }`);
     };
     m.customProgramCacheKey = () => 'nightwin';
@@ -82,7 +93,7 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
   async loadGround() {
     const idx = (this.index = await (await fetch(BASE + 'index.json')).json());
     const G = (this.G = idx.ground);
-    this.hf = new Int16Array(await (await fetch(BASE + G.f)).arrayBuffer());
+    this.hf = new Int16Array(await getBuf(G.f));
     this.buildGround();
   }
   // then the city tiles, nearest first
@@ -99,7 +110,7 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
     const worker = async () => {
       while (next < items.length) {
         const it = items[next++];
-        try { const g = await loader.loadAsync(BASE + it.f); this.add(it.set, g.scene); } catch (e) { console.warn('PLATEAU tile failed', it.f, e); }
+        try { const g = await loader.parseAsync(await getBuf(it.f), BASE); this.add(it.set, g.scene); } catch (e) { console.warn('PLATEAU tile failed', it.f, e); }
         this.loaded++; onProgress?.(this.loaded / this.total, it);
       }
     };
@@ -184,7 +195,7 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
 
   setNight(n) {
     this.uni.uNight.value = n;
-    for (const m of this.groundMats) m.emissiveIntensity = n * 0.16;
+    for (const m of this.groundMats) m.emissiveIntensity = n * 0.3;
   }
 }
 
