@@ -1,0 +1,41 @@
+{
+ "note": "Openly licensed street photos projected onto the PLATEAU buildings. Camera poses solved with tools/pose.html; masks with tools/map/photomask.py.",
+ "photos": [
+  {
+   "f": "crossing_nw_2024.webp",
+   "w": 1920,
+   "h": 1280,
+   "pos": [
+    29.83,
+    1.6,
+    31.86
+   ],
+   "yaw": 58.96,
+   "pitch": 0,
+   "focal": 1067.5,
+   "cx": 960,
+   "cy": 1121.6,
+   "credit": "Shibuya Crossing 20241020 © Supanut Arunoprayote, CC BY 4.0",
+   "source": "https://commons.wikimedia.org/wiki/File:Shibuya_Crossing_20241020.jpg",
+   "priority": 1.0
+  },
+  {
+   "f": "crossing_south_2023.webp",
+   "w": 1920,
+   "h": 1440,
+   "pos": [
+    14,
+    9,
+    66.2
+   ],
+   "yaw": 6.45,
+   "pitch": 0,
+   "focal": 1261,
+   "cx": 960,
+   "cy": 608,
+   "priority": 0.62,
+   "credit": "Shibuya Scramble Crossing, Tokyo, 23 June 2023 © PEPSI697, CC BY-SA 4.0",
+   "source": "https://commons.wikimedia.org/wiki/File:Shibuya_Scramble_Crossing,_Tokyo,_23_June_2023.jpg"
+  }
+ ]
+}

@@ -25,7 +25,7 @@ async function getBuf(f) {
 export class City {
   constructor(scene, opts = {}) {
     this.lowTex = !!opts.lowTex; // phones: halve the facade photos (about 120 MB of GPU memory instead of 490)
-    this.texLoader = new THREE.TextureLoader(); this.hi = []; this.hiAt = 0;
+    this.texLoader = new THREE.TextureLoader(); this.hi = []; this.hiAt = 0; this.projectors = []; this.photoMats = [];
     this.root = new THREE.Group(); this.root.name = 'plateau';
     scene.add(this.root);
     this.solid = []; // meshes used by physics
@@ -61,11 +61,29 @@ export class City {
   nightify(m) {
     m.onBeforeCompile = (sh) => {
       sh.uniforms.uNight = this.uni.uNight;
+      const P = this.projectors, N = P.length;
+      P.forEach((p, i) => { sh.uniforms[`uPM${i}`] = p.uM; sh.uniforms[`uPP${i}`] = p.uP; sh.uniforms[`uPT${i}`] = p.uT; sh.uniforms[`uPD${i}`] = p.uD; sh.uniforms[`uPW${i}`] = p.uW; });
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP; varying vec3 vWN;')
         .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal);');
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
 uniform float uNight; varying vec3 vWP; varying vec3 vWN;
-float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }`)
+float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float linz(float d) { return 2.0 * 0.5 * 4000.0 / (4000.0 + 0.5 - (d * 2.0 - 1.0) * (4000.0 - 0.5)); }
+${P.map((p, i) => `uniform mat4 uPM${i}; uniform vec3 uPP${i}; uniform sampler2D uPT${i}; uniform sampler2D uPD${i}; uniform float uPW${i};`).join('\n')}`)
+        .replace('#include <map_fragment>', `#include <map_fragment>
+{ // street photos projected onto the facades they show (depth-tested from each photo's camera)
+  float bestW = 0.0; vec3 bestC = vec3(0.0); vec3 nW = normalize(vWN);
+${P.map((p, i) => `  { vec4 c = uPM${i} * vec4(vWP, 1.0);
+    if (c.w > 0.0) { vec3 nd = c.xyz / c.w; vec2 uv = nd.xy * 0.5 + 0.5;
+      if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0 && nd.z < 1.0) {
+        vec3 tp = uPP${i} - vWP; float dist = length(tp); float facing = dot(nW, tp / dist);
+        float sd = linz(texture2D(uPD${i}, uv).r), fd = linz(nd.z * 0.5 + 0.5);
+        if (facing > 0.06 && fd < sd + 0.7 + fd * 0.012) {
+          vec4 pc = texture2D(uPT${i}, uv);
+          float w = uPW${i} * pc.a * smoothstep(0.06, 0.3, facing) * smoothstep(0.0, 0.02, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+          if (w > bestW) { bestW = w; bestC = pc.rgb; } } } } }`).join('\n')}
+  diffuseColor.rgb = mix(diffuseColor.rgb, bestC * 0.92, min(1.0, bestW * 1.6));
+}`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 if (uNight > 0.01 && abs(vWN.y) < 0.35) {
   float u = abs(vWN.x) > abs(vWN.z) ? vWP.z : vWP.x;
@@ -87,7 +105,7 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
   totalEmissiveRadiance += uNight * (warm * win * 0.38 * mix(0.25, 1.0, glass) * (1.0 - shop) + sign * 0.5);
 }`);
     };
-    m.customProgramCacheKey = () => 'nightwin';
+    m.customProgramCacheKey = () => 'nightwin' + this.projectors.length;
   }
 
   // street heightfield first (small): everything else is placed on it
@@ -186,8 +204,30 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
     map.anisotropy = 8;
     // aerial facade photos come out cool and hazy: warm them slightly
     const m = new THREE.MeshStandardMaterial({ map, color: 0xfff1e2, roughness: windows ? 0.78 : 0.9, metalness: 0, emissive: 0x000000, alphaTest: cut ? 0.4 : 0, side: cut ? THREE.DoubleSide : THREE.FrontSide });
-    if (windows) { this.nightify(m); m.emissive = new THREE.Color(0x000000); }
+    if (windows) { this.nightify(m); m.emissive = new THREE.Color(0x000000); this.photoMats.push(m); }
     return m;
+  }
+
+  // Street photos (openly licensed, see assets/photos/photos.json) projected onto the buildings they show.
+  // Each photo's camera was solved against this model (tools/pose.html); a depth map from that camera keeps
+  // the photo off surfaces it can't see.
+  async addProjectors(renderer, url) {
+    const list = await (await fetch(url)).json();
+    const base = url.slice(0, url.lastIndexOf('/') + 1);
+    const holder = new THREE.Scene(), parent = this.root.parent;
+    for (const p of list.photos) {
+      const fullW = 2 * Math.max(p.cx, p.w - p.cx), fullH = 2 * Math.max(p.cy, p.h - p.cy);
+      const cam = new THREE.PerspectiveCamera(2 * Math.atan(fullH / 2 / p.focal) * 180 / Math.PI, fullW / fullH, 0.5, 4000);
+      cam.setViewOffset(fullW, fullH, fullW / 2 - p.cx, fullH / 2 - p.cy, p.w, p.h);
+      cam.position.set(...p.pos); cam.rotation.order = 'YXZ'; cam.rotation.set((p.pitch || 0) * Math.PI / 180, p.yaw * Math.PI / 180, (p.roll || 0) * Math.PI / 180);
+      cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+      const rt = new THREE.WebGLRenderTarget(1024, Math.round(1024 * p.h / p.w), { depthTexture: new THREE.DepthTexture(), depthBuffer: true });
+      holder.add(this.root); renderer.setRenderTarget(rt); renderer.render(holder, cam); renderer.setRenderTarget(null); parent.add(this.root);
+      const tex = await this.texLoader.loadAsync(base + p.f); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+      this.projectors.push({ uM: { value: new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse) }, uP: { value: cam.position.clone() }, uT: { value: tex }, uD: { value: rt.depthTexture }, uW: { value: p.priority ?? 1 }, credit: p.credit });
+    }
+    for (const m of this.photoMats) m.needsUpdate = true;
+    return list.photos.map((p) => p.credit);
   }
 
   // Heightfield (lowest road surface per 4 m cell; holes filled) -> continuous street-level ground under everything.

@@ -109,8 +109,8 @@ export function buildDetails(scene, phys, city) {
     D.screens.push({ s, m, x, y: y0 + h / 2, z });
   };
   // QFRONT (Q's EYE) on the south face toward the crossing; MAGNET by SHIBUYA109 on its west face
-  screen(11, -8.9, -29.25, 7, 13.5, 17, Math.atan2(0.107, 0.994));
-  screen(23, 24.1, -21.85, 9, 7.5, 9.5, Math.atan2(-0.98, -0.2));
+  // (QFRONT and MAGNET now show their real facades from the street photos, screens included)
+  void screen;
 
   // ---------- landmark name signs ----------
   {
@@ -120,9 +120,9 @@ export function buildDetails(scene, phys, city) {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.position.set(x, y, z); m.rotation.y = ry; root.add(m);
     };
     const qr = Math.atan2(0.107, 0.994);
-    plaque('QFRONT', -8.9, -29.2, 27.5, 9, 2.2, qr, { bg: '#111', fg: '#fff', weight: 900 });
-    plaque(['SHIBUYA TSUTAYA', 'Starbucks 2F'], -8.9, -29.3, 5.2, 12, 1.3, qr, { bg: '#0d2a6b', fg: '#fff' });
-    plaque('MAGNET by SHIBUYA109', 24.0, -21.9, 21, 10, 1.6, Math.atan2(-0.98, -0.2), { bg: '#f4f4f2', fg: '#1b1d21' });
+    // QFRONT's ground floor sits behind the crowd in the photos: its shop signs are drawn here
+    plaque('STARBUCKS COFFEE', -12.5, -29.0, 4.3, 6.5, 0.8, qr, { bg: '#1e3932', fg: '#fff' });
+    plaque('SHIBUYA TSUTAYA', -4.2, -29.7, 4.3, 6.5, 0.8, qr, { bg: '#0b2a8a', fg: '#ffd400' });
     // SHIBUYA109's cylinder: a curved name band near the top, facing the crossing
     const tex = signTex('SHIBUYA109', { w: 1024, h: 160, bg: '#202024', fg: '#f2f2f2' });
     const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.FrontSide }); D.signMats.push(mat);
@@ -130,23 +130,37 @@ export function buildDetails(scene, phys, city) {
     const band = new THREE.Mesh(g, mat); band.position.set(-136.8, 40, -7.3); root.add(band);
   }
 
-  // ---------- Center Gai gate (street heads north-west from the Q-FRONT corner) ----------
+  // ---------- Center Gai gate: two white hook-shaped posts with the name down the curve, a banner between ----------
   {
     const ux = -0.67, uz = -0.74, px = uz, pz = -ux; // street dir, across-street
     const cx = -20.6, cz = -17.6, y = gy(cx, cz);
-    for (const s of [-4.2, 4.2]) {
-      const x = cx + px * s, z = cz + pz * s;
-      add(new THREE.CylinderGeometry(0.2, 0.22, 7.2, 10).translate(x, y + 3.6, z), M.metal);
-      phys.box(x, z, 0.5, 0.5, y - 1, y + 7);
+    const white = std({ color: 0xe9eaec, roughness: 0.3, metalness: 0.4 });
+    const nameTex = signTex('渋谷センター街', { w: 96, h: 640, bg: '#f4f4f2', fg: '#111', vertical: true });
+    const nameMat = new THREE.MeshBasicMaterial({ map: nameTex }); D.signMats.push(nameMat);
+    for (const sd of [-1, 1]) {
+      const bx = cx + px * sd * 4.4, bz = cz + pz * sd * 4.4;
+      // local frame: +a toward the street centre, up = y
+      const ax = -px * sd, az = -pz * sd;
+      const pts = [];
+      for (let k = 0; k <= 12; k++) pts.push(new THREE.Vector3(0, k * 0.5, 0));
+      for (let k = 1; k <= 12; k++) { const t = k / 12 * PI * 0.62; pts.push(new THREE.Vector3((1 - Math.cos(t)) * 1.5, 6 + Math.sin(t) * 1.5, 0)); }
+      const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.26, 12, false);
+      const rot = Math.atan2(ax, az) - PI / 2;
+      tube.rotateY(rot).translate(bx, y, bz);
+      add(tube, white);
+      const end = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.12, 14), M.dark);
+      end.position.set(bx + ax * 1.98, y + 7.12, bz + az * 1.98); end.rotation.set(0, rot, -0.62 * PI + PI / 2 - 0.5); root.add(end);
+      // vertical name plate on the street-facing side of the post
+      for (const f of [1, -1]) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 2.8), nameMat);
+        m.position.set(bx + ux * 0.27 * f, y + 4.4, bz + uz * 0.27 * f); m.rotation.y = Math.atan2(ux * f, uz * f); root.add(m);
+      }
+      phys.box(bx, bz, 0.6, 0.6, y - 1, y + 7);
     }
-    const h = Math.atan2(px, pz);
-    const beam = add(new THREE.BoxGeometry(9.2, 1.5, 0.5), M.dark); beam.position.set(cx, y + 7.2, cz); beam.rotation.y = h - PI / 2;
-    const tex = signTex(['SHIBUYA CENTER GAI', '渋谷センター街'], { w: 1024, h: 168, bg: '#e8380d', fg: '#fff' });
-    const mat = new THREE.MeshBasicMaterial({ map: tex }); D.signMats.push(mat);
-    for (const sd of [1, -1]) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(8.8, 1.35), mat);
-      m.position.set(cx - ux * 0.27 * sd, y + 7.2, cz - uz * 0.27 * sd); m.rotation.y = Math.atan2(-ux * sd, -uz * sd); root.add(m);
-    }
+    const ban = signTex(['SHIBUYA CENTER GAI', '渋谷センター街へようこそ'], { w: 1024, h: 220, bg: '#f2c400', fg: '#1b1d21' });
+    const bm = new THREE.MeshBasicMaterial({ map: ban, side: THREE.DoubleSide }); D.signMats.push(bm);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(5.0, 1.15), bm);
+    m.position.set(cx, y + 5.6, cz); m.rotation.y = Math.atan2(ux, uz); root.add(m);
   }
 
   // ---------- JR Yamanote Line: rails, island platform, canopy ----------

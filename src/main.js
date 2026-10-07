@@ -85,6 +85,8 @@ async function boot(saved) {
   let mode = 'real', pr = null, tilePhys = null, PM = null, prAttrAt = 0;
   const groundL = (x, z) => pr.ground(x, z);
   const realAttr = '3D都市モデル <b>Project PLATEAU</b> (国土交通省) · 航空写真 <b>国土地理院</b>';
+  let photoCredits = [];
+  const photoAttr = () => (photoCredits.length ? '<br>Street photos: ' + photoCredits.map((c) => c.replace(/[<>&]/g, '')).join(' · ') : '');
   const urlKey = new URLSearchParams(location.search).get('key');
   if (urlKey) store.set('shibuya.gkey', urlKey);
   $('gkey').value = store.get('shibuya.gkey') || '';
@@ -133,7 +135,7 @@ async function boot(saved) {
       city.root.visible = true; details.root.visible = true; if (street) street.root.visible = true; sky.farGroup.visible = true; traffic.sigGroup.visible = true;
       player.phys = cityPhys; player.fly = false; player.canFly = false;
       post.aoOn = true;
-      $('attr').hidden = false; $('attr').innerHTML = realAttr; hud.zoneOverride = null; hud.zone = '';
+      $('attr').hidden = false; $('attr').innerHTML = realAttr + photoAttr(); hud.zoneOverride = null; hud.zone = '';
       player.teleport(TRAVEL[0].p, TRAVEL[0].yaw, 0.02);
     }
     $('wReal').setAttribute('aria-pressed', String(mode === 'real')); $('wPhoto').setAttribute('aria-pressed', String(mode === 'photo'));
@@ -167,7 +169,12 @@ async function boot(saved) {
   city.load(startP, (f) => {
     if (!ready) $('goBtn').textContent = `Loading real Shibuya… ${Math.round(f * 100)}%`;
     if (f > 0.5) goReady();
-    if (f >= 1) { goReady(); cityPhys.nearAt.set(1e9, 0, 0); }
+    if (f >= 1) {
+      goReady(); cityPhys.nearAt.set(1e9, 0, 0);
+      city.addProjectors(renderer, new URL('../assets/photos/photos.json', import.meta.url).href)
+        .then((c) => { photoCredits = c; if (mode === 'real') $('attr').innerHTML = realAttr + photoAttr(); })
+        .catch((e) => console.warn('street photos', e));
+    }
   }).catch((e) => { console.error(e); goReady(); hud.toast('読み込み失敗', 'Part of the 3D city could not be loaded: ' + e.message); });
 
   // ---- UI wiring ----

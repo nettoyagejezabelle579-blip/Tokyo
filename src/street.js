@@ -137,7 +137,7 @@ export async function buildStreet(scene, city, url) {
       const y0 = g - 0.25, sh = 3.55, rnd = R();
       const ox = nx * 0.1, oz = nz * 0.1;
       Q.sf.add(x + ux * 0.15 + ox, y0, z + uz * 0.15 + oz, ux, uz, uw - 0.3, sh, cell(Math.floor(rnd * 16), SF.cols, SF.rows));
-      Q.fa.add(x + nx * 0.18, y0 + sh, z + nz * 0.18, ux, uz, uw, 0.85, cell(Math.floor(R() * NAMES.length), FA.cols, FA.rows));
+      if (!(mx > -33 && mx < 3 && mz > -46 && mz < -26)) Q.fa.add( // QFRONT has its own signs (details.js)x + nx * 0.18, y0 + sh, z + nz * 0.18, ux, uz, uw, 0.85, cell(Math.floor(R() * NAMES.length), FA.cols, FA.rows));
       // vertical signs on taller buildings, sticking out from the wall
       if (hgt > 10 && R() < 0.5) {
         const sx = x + ux * Math.min(uw - 0.3, 0.6), sz = z + uz * Math.min(uw - 0.3, 0.6);
