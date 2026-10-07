@@ -125,7 +125,8 @@ class Train {
 }
 
 export class Rail {
-  constructor(scene, world) {
+  constructor(scene0, world) {
+    const scene = (this.group = new THREE.Group()); scene0.add(scene);
     this.scene = scene;
     this.mat = { yamanote: atlas('yamanote'), ginza: atlas('ginza') };
     this.geos = {};

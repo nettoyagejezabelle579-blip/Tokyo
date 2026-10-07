@@ -102,6 +102,14 @@
   #fade { position: fixed; inset: 0; z-index: 25; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.35s; }
   #fade.on { opacity: 1; }
   body.pre .hud, body.pre #joy { visibility: hidden; }
+  .photoOnly { display: none !important; }
+  body.photo .photoOnly { display: flex !important; }
+  body.photo .tb.photoOnly { display: grid !important; }
+  body.photo #bl { display: none; }
+  #attr { right: 12px; bottom: calc(6px + env(safe-area-inset-bottom, 0px)); max-width: min(70vw, 640px); font-size: 10px; color: #fff; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,0.6); text-align: right; line-height: 1.4; }
+  #attr b { font-size: 12px; letter-spacing: 0.02em; }
+  body.touch.photo #attr { bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
+  #gkey { flex: 1 1 220px; min-width: 0; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06); color: var(--fg); font: inherit; font-size: 13px; }
   @media (max-width: 640px) {
     #tl { flex-direction: column; gap: 6px; }
     #tr { width: 190px; gap: 6px; } #clock { font-size: 22px; } #clockBox { padding: 7px 10px; } #date { font-size: 10px; } #live { font-size: 9px; letter-spacing: 0.04em; padding: 3px 6px; }
@@ -133,7 +141,11 @@
 <div class="hud panel" id="prompt" hidden></div>
 <div class="hud" id="cross"></div>
 <div id="joy" hidden><div id="knob"></div></div>
+<div class="hud" id="attr" hidden></div>
 <div class="hud" id="touchUi">
+  <button class="tb panel photoOnly" id="tUp" type="button" aria-label="Fly up">▲</button>
+  <button class="tb panel photoOnly" id="tDown" type="button" aria-label="Fly down">▼</button>
+  <button class="tb panel photoOnly" id="tFly" type="button" aria-pressed="false">FLY</button>
   <button class="tb panel" id="tJump" type="button">JUMP</button>
   <button class="tb panel" id="tRun" type="button" aria-pressed="false">RUN</button>
 </div>
@@ -146,6 +158,22 @@
     <div class="note">Everything runs on Tokyo time (JST). Trains follow the published Shibuya timetable for today’s weekday or 土休日 schedule.</div>
     <h3>Go to · ワープ</h3>
     <div class="trows" id="travelList"></div>
+    <h3>World · 表示</h3>
+    <div class="row">
+      <button class="chip" id="wClassic" type="button" aria-pressed="true">Classic 3D</button>
+      <button class="chip" id="wPhoto" type="button" aria-pressed="false">Photoreal · Google 3D Tiles</button>
+      <button class="chip photoOnly" id="wFly" type="button" aria-pressed="false">Fly</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="gkey" type="password" autocomplete="off" spellcheck="false" placeholder="Google Maps Platform API key" aria-label="Google Maps Platform API key">
+      <button class="chip" id="gkeySave" type="button">Use key</button>
+    </div>
+    <div class="note">Photoreal mode streams Google's Photorealistic 3D Tiles, the same 3D city you see in Google Earth. It needs your own API key with the <b>Map Tiles API</b> enabled (<a href="https://developers.google.com/maps/documentation/tile/get-api-key" target="_blank" rel="noopener">get a key</a>); Google bills per session after its free monthly quota. The key is stored only in this browser. Run the game from your own site, such as GitHub Pages, because this preview link cannot reach Google. Clocks, signals and train times stay live; trains are drawn only in Classic 3D.</div>
+    <div class="row photoOnly" style="margin-top:8px">
+      <label for="alignRot" class="note" style="min-width:140px">Line up the crowd</label>
+      <input type="range" id="alignRot" min="-60" max="60" step="1" value="15" aria-label="Rotate the simulated crowd and cars">
+      <button class="chip" id="alignReset" type="button">Reset</button>
+    </div>
     <h3>Time · 時刻</h3>
     <div class="row">
       <button class="chip" id="liveBtn" type="button" aria-pressed="true">LIVE</button>
@@ -182,7 +210,7 @@
     <div class="keys"><kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · mouse look · <kbd>M</kbd> map · <kbd>E</kbd> elevator<br>Phone: left thumb walk, right thumb look</div>
   </div>
 </div>
-<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/" } }</script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/", "3d-tiles-renderer/three": "./vendor/3d-tiles-renderer/index.three.js", "3d-tiles-renderer/plugins": "./vendor/3d-tiles-renderer/index.plugins.js", "three-mesh-bvh": "./vendor/three-mesh-bvh.module.js" } }</script>
 <script type="module" src="./src/main.js"></script>
 <!--/BODY-->
 </body>

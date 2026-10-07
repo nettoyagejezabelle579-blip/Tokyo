@@ -109,7 +109,7 @@ export class Hud {
     const live = Math.abs(offset) < 1000;
     $('live').textContent = live ? 'LIVE · JST' : `${offset > 0 ? '+' : '−'}${fmtOff(Math.abs(offset))} · JST`;
     $('live').dataset.live = live ? '1' : '0';
-    const z = this.zoneAt(p);
+    const z = (this.zoneOverride && this.zoneOverride(p)) || this.zoneAt(p);
     if (z.jp !== this.zone) { this.zone = z.jp; $('locJp').textContent = z.jp; $('locEn').textContent = z.en; }
     // departures
     const rows = [];

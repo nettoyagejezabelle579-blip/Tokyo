@@ -22,6 +22,16 @@ python3 -m http.server 8000
 
 The menu has fast travel, a time slider (look at another hour; LIVE snaps back) and a battery-saver mode.
 
+## Photoreal mode (Google 3D Tiles)
+
+Menu → **World → Photoreal · Google 3D Tiles** swaps the hand-built city for Google's Photorealistic 3D Tiles (the 3D city from Google Earth). Clock, signals and train timetables stay live; the simulated crowd and cars walk the real crossing (use *Line up the crowd* to rotate them onto the real crosswalks); `F` or the FLY button toggles flying.
+
+1. In Google Cloud, enable the **Map Tiles API** and create an API key ([guide](https://developers.google.com/maps/documentation/tile/get-api-key)). Restrict it to your site's address. Google bills per session after the free monthly quota.
+2. Host the game (the claude.ai preview link cannot reach Google). GitHub Pages: repository **Settings → Pages → Deploy from a branch**, pick this branch and `/ (root)`, save, then open `https://<user>.github.io/Tokyo/`.
+3. Paste the key in the menu (stored only in that browser) or open the page as `…/Tokyo/?key=YOUR_KEY`.
+
+Libraries: [3d-tiles-renderer](https://github.com/NASA-AMMOS/3DTilesRendererJS), [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) and three.js's Draco decoder, vendored in `vendor/` (Apache-2.0 / MIT).
+
 ## Data notes
 
 - Yamanote weekday departures: JR East Shibuya timetable (2026). Weekend/holiday Yamanote rows and some Ginza Line hours are filled from the published headway for that hour.

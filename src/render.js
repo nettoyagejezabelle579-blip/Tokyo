@@ -49,6 +49,7 @@ export class Post {
     this.composer.setSize(w, h);
   }
   render(night, dt) {
+    if (this.ao) this.ao.enabled = this.aoOn !== false;
     this.bloom.strength = 0.15 + night * 0.3;
     this.bloom.threshold = 0.95 - night * 0.1;
     this.bloom.radius = 0.4 + night * 0.15;

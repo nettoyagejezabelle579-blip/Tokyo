@@ -78,7 +78,8 @@ export class Sky {
     this.night = 0;
   }
 
-  buildFar(scene) {
+  buildFar(scene0) {
+    const scene = (this.farGroup = new THREE.Group()); scene0.add(scene);
     const R = rng(99);
     const F = facades();
     // distant city: instanced boxes in a ring around the playable area
@@ -187,7 +188,7 @@ export class Sky {
     const el = s.elev * 180 / Math.PI;
     const night = 1 - smooth(-7, 4, el);
     const golden = smooth(18, 2, el) * (1 - smooth(2, -5, el));
-    this.night = night;
+    this.night = night; this.golden = golden;
     const u = this.uni;
     u.uSun.value.copy(this.sunDir); u.uMoon.value.copy(mdir);
     u.uNight.value = night; u.uTime.value = now / 1000 % 100000; u.uMoonPhase.value = 1 - Math.abs(mo.phase - 0.5) * 2;

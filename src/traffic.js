@@ -148,7 +148,8 @@ const ROUTES = [
 void dog;
 
 export class Traffic {
-  constructor(scene, mobile) {
+  constructor(scene0, mobile) {
+    const scene = (this.group = new THREE.Group()); scene0.add(scene);
     this.meshes = {};
     const MAT = {
       paint: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.22, metalness: 0.55 }),
@@ -220,7 +221,8 @@ export class Traffic {
     return { XNS: x.ns, XEW: x.ew, MA: m.a, MB: m.b, RA: r.a, RB: r.b, ped: x.ped, scr: x, m, r };
   }
 
-  update(dt, now, night) {
+  update(dt, now, night, opt = {}) {
+    const RAD2 = opt.radius ? opt.radius * opt.radius : 0, ground = opt.ground, Z = new THREE.Vector3(0, 0, 0);
     const S = this.sigState(now);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), ax = new THREE.Vector3(0, 1, 0);
     for (const r of this.routes) {
@@ -245,7 +247,8 @@ export class Traffic {
         if (v.s > r.L) { v.s -= r.L; }
         const [x, z, h] = this.at(r, v.s);
         q.setFromAxisAngle(ax, h);
-        m4.compose(p.set(x, r.y + 0.02, z), q, sc);
+        const out = RAD2 && (r.y > 0 || x * x + z * z > RAD2);
+        m4.compose(p.set(x, r.y + 0.02 + (ground && !out ? ground(x, z) : 0), z), q, out ? Z : sc);
         const ms = this.meshes[v.type];
         for (const k of ['paint', 'glass', 'dark', 'rim', 'lights']) ms[k].setMatrixAt(v.idx, m4);
       }
@@ -256,7 +259,8 @@ export class Traffic {
     return S;
   }
 
-  buildSignals(scene) {
+  buildSignals(scene0) {
+    const scene = (this.sigGroup = new THREE.Group()); scene0.add(scene);
     const lampGeo = new THREE.CircleGeometry(0.13, 12);
     const mk = (c) => new THREE.MeshBasicMaterial({ color: c });
     this.sigMats = {};

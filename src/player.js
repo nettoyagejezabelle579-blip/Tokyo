@@ -24,6 +24,7 @@ export class Player {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
       this.keys.add(e.code);
       if (e.code === 'Space') { this.jumpReq = true; e.preventDefault(); }
+      if (e.code === 'KeyF' && this.canFly) { this.fly = !this.fly; this.vy = 0; this.onFly?.(this.fly); }
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -77,6 +78,22 @@ export class Player {
     };
     d.addEventListener('touchend', end); d.addEventListener('touchcancel', end);
   }
+  updateFly(dt, ix, iz) {
+    const k = this.keys, p = this.pos;
+    const fast = k.has('ShiftLeft') || k.has('ShiftRight') || this.runToggle;
+    const sp = fast ? 60 : 16;
+    const ch = Math.cos(this.h), sh = Math.sin(this.h), cp = Math.cos(this.pitch), spch = Math.sin(this.pitch);
+    let vy = (k.has('Space') || this.flyUp ? 1 : 0) - (k.has('KeyC') || k.has('KeyQ') || this.flyDown ? 1 : 0);
+    const tx = (sh * cp * iz - ch * ix) * sp, tz = (ch * cp * iz + sh * ix) * sp, ty = spch * iz * sp + vy * sp * 0.6;
+    this.vel.x += (tx - this.vel.x) * Math.min(1, dt * 4); this.vel.z += (tz - this.vel.z) * Math.min(1, dt * 4); this.vy += (ty - this.vy) * Math.min(1, dt * 4);
+    p.x += this.vel.x * dt; p.z += this.vel.z * dt; p.y = Math.min(1500, p.y + this.vy * dt);
+    const f = this.phys.floorAt(p.x, p.z, p.y + 2, 3);
+    if (p.y < f) p.y = f;
+    this.jumpReq = false; this.events.length = 0; this.ground = false;
+    this.cam.position.set(p.x, p.y + 1.6, p.z);
+    this.cam.rotation.set(this.pitch, this.h + Math.PI, 0);
+    this.speed = Math.hypot(this.vel.x, this.vel.z);
+  }
   look(dx, dy, s) {
     this.h -= dx * s; this.pitch = clamp(this.pitch - dy * s, -1.45, 1.45);
   }
@@ -93,6 +110,7 @@ export class Player {
       ix += this.joy.x; iz += this.joy.y;
     }
     const m = Math.hypot(ix, iz); if (m > 1) { ix /= m; iz /= m; }
+    if (this.fly) { this.updateFly(dt, ix, iz); return; }
     const run = k.has('ShiftLeft') || k.has('ShiftRight') || this.runToggle || Math.hypot(this.joy.x, this.joy.y) > 0.97 && this.runToggle;
     const speed = run ? 7.0 : 3.0;
     const sh = Math.sin(this.h), ch = Math.cos(this.h);

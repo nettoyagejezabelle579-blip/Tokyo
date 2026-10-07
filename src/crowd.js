@@ -35,7 +35,8 @@ const AMB = [
 ];
 
 export class Crowd {
-  constructor(scene, mobile) {
+  constructor(scene0, mobile) {
+    const scene = (this.group = new THREE.Group()); scene0.add(scene);
     const ambList = [];
     for (const q of AMB) for (let k = 0; k < Math.round(q.n * (mobile ? 0.45 : 0.8)); k++) ambList.push(q);
     const NC = mobile ? 150 : 320, NA = ambList.length, NS = mobile ? 30 : 60;
@@ -161,7 +162,8 @@ export class Crowd {
     p.k = 1; p.state = 'cross'; p.mode = 'out'; p.corner = tk;
   }
 
-  update(dt, now, cam, nightDensity) {
+  update(dt, now, cam, nightDensity, opt = {}) {
+    const RAD2 = opt.radius ? opt.radius * opt.radius : 0, ground = opt.ground;
     const sig = scramblePhase(now / 1000);
     const go = sig.ped === 'go', blink = sig.ped === 'blink';
     const P = this.parts;
@@ -194,6 +196,8 @@ export class Crowd {
         }
       }
       // write matrices
+      if (RAD2 && (p.kind === 'stand' || (p.amb && p.amb.y) || p.x * p.x + p.z * p.z > RAD2)) { this.hide(arr, i); continue; }
+      const gy = ground ? ground(p.x, p.z) : 0;
       const near = (p.x - cx) * (p.x - cx) + (p.z - cz) * (p.z - cz) < 170 * 170;
       const c = Math.cos(p.th), s = Math.sin(p.th), sc = p.sc, L = p.look;
       let hipL, hipR, kneeL, kneeR, shL, shR, elL, elR, bob;
@@ -208,7 +212,7 @@ export class Crowd {
         const sw = Math.sin(now / 1500 + p.idle) * 0.03;
         hipL = sw; hipR = -sw; kneeL = kneeR = 0.04; shL = 0.06; shR = 0.06; elL = elR = L.bag === 2 ? -0.9 : -0.18; bob = 0;
       }
-      const y = p.y + bob;
+      const y = p.y + bob + gy;
       const W = L.width;
       put(arr.torso, i, p.x, y, p.z, c, s, sc, 0, 0, 0, 0, W);
       put(arr.pelvis, i, p.x, y, p.z, c, s, sc, 0, 0, 0, 0, W);
