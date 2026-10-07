@@ -150,6 +150,6 @@ export async function buildStreet(scene, city, url) {
   for (const k of ['sf', 'fa', 'vs']) { const m = Q[k].mesh(M[k]); m.castShadow = k === 'vs'; root.add(m); }
   return {
     root,
-    setNight(n) { M.sf.emissiveIntensity = 0.35 + n * 1.4; M.fa.emissiveIntensity = 0.15 + n * 1.3; M.vs.emissiveIntensity = 0.1 + n * 1.6; },
+    setNight(n) { M.sf.emissiveIntensity = 0.3 + n * 0.55; M.fa.emissiveIntensity = 0.12 + n * 0.75; M.vs.emissiveIntensity = 0.08 + n * 0.95; M.sf.color.setScalar(1 - n * 0.55); M.fa.color.setScalar(1 - n * 0.5); },
   };
 }

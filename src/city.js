@@ -84,7 +84,7 @@ if (uNight > 0.01 && abs(vWN.y) < 0.35) {
   float shop = 1.0 - smoothstep(3.6, 5.0, vWP.y);
   // signs and storefronts baked into the photos light up in their own colours
   vec3 sign = c * (smoothstep(0.12, 0.4, sat) * 2.2 + shop * 1.1);
-  totalEmissiveRadiance += uNight * (warm * win * 0.6 * mix(0.3, 1.0, glass) * (1.0 - shop) + sign * 0.55);
+  totalEmissiveRadiance += uNight * (warm * win * 0.38 * mix(0.25, 1.0, glass) * (1.0 - shop) + sign * 0.5);
 }`);
     };
     m.customProgramCacheKey = () => 'nightwin';
