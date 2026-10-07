@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng } from './util.js';
 import { scramblePhase, JR, GZ, CENTER_GAI } from './layout.js';
 import { toWorld } from './util.js';
@@ -36,36 +37,72 @@ const AMB = [
 export class Crowd {
   constructor(scene, mobile) {
     const ambList = [];
-    for (const q of AMB) for (let k = 0; k < Math.round(q.n * (mobile ? 0.6 : 1)); k++) ambList.push(q);
-    const NC = mobile ? 190 : 380, NA = ambList.length, NS = mobile ? 40 : 70;
+    for (const q of AMB) for (let k = 0; k < Math.round(q.n * (mobile ? 0.45 : 0.8)); k++) ambList.push(q);
+    const NC = mobile ? 150 : 320, NA = ambList.length, NS = mobile ? 30 : 60;
     this.N = NC + NA + NS; this.NC = NC; this.NA = NA;
     const N = this.N;
-    const lam = (c) => new THREE.MeshLambertMaterial({ color: c });
+    const cloth = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 });
+    const hairM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 });
+    const skinPlain = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 });
+    const shoeM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+    const torsoG = new THREE.LatheGeometry([[0.0, 0], [0.13, 0], [0.15, 0.08], [0.155, 0.2], [0.18, 0.32], [0.2, 0.4], [0.185, 0.45], [0.09, 0.49], [0.0, 0.5]].map(([x, y]) => new THREE.Vector2(x, y)), 9).scale(1, 1, 0.62).translate(0, 0.97, 0);
+    const neck = new THREE.CylinderGeometry(0.045, 0.05, 0.12, 6, 1, true).translate(0, 1.5, 0);
+    neck.attributes.uv.array.fill(0.9);
+    const headG = mergeGeometries([new THREE.SphereGeometry(0.1, 14, 9).scale(0.8, 1.05, 0.92).translate(0, 1.6, 0.005), neck]);
+    const face = document.createElement('canvas'); face.width = 256; face.height = 128;
+    { const g = face.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 256, 128);
+      g.fillStyle = 'rgba(40,28,22,0.95)'; for (const dx of [-7, 7]) { g.beginPath(); g.ellipse(64 + dx, 60, 2.6, 1.8, 0, 0, 7); g.fill(); }
+      g.fillStyle = 'rgba(60,40,30,0.55)'; for (const dx of [-7, 7]) g.fillRect(64 + dx - 3.5, 53, 7, 1.6);
+      g.fillStyle = 'rgba(160,90,80,0.55)'; g.fillRect(60, 79, 8, 1.6);
+      g.fillStyle = 'rgba(120,80,60,0.15)'; g.fillRect(63, 62, 2, 10); }
+    const faceTex = new THREE.CanvasTexture(face); faceTex.colorSpace = THREE.SRGBColorSpace;
+    skin.map = faceTex;
+    const hairS = new THREE.SphereGeometry(0.109, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.55).rotateX(-0.5).scale(0.84, 1.06, 0.98).translate(0, 1.613, -0.006);
+    const hairL = mergeGeometries([new THREE.SphereGeometry(0.112, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.6).rotateX(-0.55).scale(0.86, 1.06, 1.0).translate(0, 1.61, -0.008), new THREE.CapsuleGeometry(0.085, 0.2, 2, 7).scale(1.15, 1, 0.5).translate(0, 1.47, -0.07)]);
+    const capsule = (r, l, top) => new THREE.CylinderGeometry(r, r * 0.82, l + r * 1.6, 7, 1, false).translate(0, -(l / 2 + r) + top, 0);
+    const N2 = N * 2;
+    const im = (g, m, n) => new THREE.InstancedMesh(g, m, n);
     this.parts = {
-      torso: new THREE.InstancedMesh(new THREE.BoxGeometry(0.44, 0.62, 0.25), lam(0xffffff), N),
-      head: new THREE.InstancedMesh(new THREE.SphereGeometry(0.115, 7, 5), lam(0xffffff), N),
-      hair: new THREE.InstancedMesh(new THREE.SphereGeometry(0.128, 7, 3, 0, Math.PI * 2, 0, Math.PI * 0.55), lam(0xffffff), N),
-      legL: new THREE.InstancedMesh(new THREE.BoxGeometry(0.15, 0.86, 0.16).translate(0, -0.43, 0), lam(0xffffff), N),
-      legR: new THREE.InstancedMesh(new THREE.BoxGeometry(0.15, 0.86, 0.16).translate(0, -0.43, 0), lam(0xffffff), N),
-      armL: new THREE.InstancedMesh(new THREE.BoxGeometry(0.1, 0.6, 0.11).translate(0, -0.3, 0), lam(0xffffff), N),
-      armR: new THREE.InstancedMesh(new THREE.BoxGeometry(0.1, 0.6, 0.11).translate(0, -0.3, 0), lam(0xffffff), N),
+      torso: im(torsoG, cloth, N),
+      pelvis: im(new THREE.SphereGeometry(1, 9, 6).scale(0.165, 0.12, 0.115).translate(0, 0.935, 0), cloth, N),
+      head: im(headG, skin, N),
+      hairS: im(hairS, hairM, N), hairL: im(hairL, hairM, N),
+      thigh: im(capsule(0.07, 0.3, 0.04), cloth, N2),
+      shin: im(capsule(0.052, 0.33, 0.02), cloth, N2),
+      shoe: im(new THREE.CylinderGeometry(0.05, 0.055, 0.24, 6, 1, false).rotateX(Math.PI / 2).scale(1.05, 0.7, 1).translate(0, -0.445, 0.045), shoeM, N2),
+      uarm: im(capsule(0.044, 0.2, 0.03), cloth, N2),
+      farm: im(capsule(0.037, 0.18, 0.02), cloth, N2),
+      hand: im(new THREE.SphereGeometry(0.042, 5, 4).scale(0.8, 1.1, 0.6).translate(0, -0.27, 0), skinPlain, N2),
+      skirt: im(new THREE.CylinderGeometry(0.165, 0.27, 0.5, 10, 1, true).translate(0, 0.72, 0), cloth, N),
+      bag: im(new THREE.BoxGeometry(1, 1, 1), cloth, N),
     };
     const col = new THREE.Color();
     for (const k in this.parts) {
       const m = this.parts[k];
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.frustumCulled = false;
-      m.castShadow = k === 'torso' || k === 'legL' || k === 'legR';
+      m.castShadow = ['torso', 'thigh', 'shin', 'skirt', 'head'].includes(k);
+      m.receiveShadow = false;
       scene.add(m);
     }
     this.p = [];
     for (let i = 0; i < N; i++) {
-      const top = R.pick(TOPS), bot = R.pick(BOTS), skin = R.pick(SKIN), hair = R.pick(HAIR);
-      this.parts.torso.setColorAt(i, col.setHex(top));
-      this.parts.armL.setColorAt(i, col.setHex(R() < 0.6 ? top : skin)); this.parts.armR.setColorAt(i, col);
-      this.parts.legL.setColorAt(i, col.setHex(bot)); this.parts.legR.setColorAt(i, col);
-      this.parts.head.setColorAt(i, col.setHex(skin)); this.parts.hair.setColorAt(i, col.setHex(hair));
-      const p = { x: 0, y: 0.02, z: 0, th: 0, sp: R.range(1.15, 1.55), sc: R.range(0.9, 1.07), ph: R() * 6, path: null, k: 0, state: 'walk', off: R.range(-1, 1), active: true, idle: 0 };
+      const top = R.pick(TOPS), bot = R.pick(BOTS), skinC = R.pick(SKIN), hair = R.pick(HAIR);
+      const fem = R() < 0.5;
+      const look = { fem, skirt: fem && R() < 0.4 ? 1 : R() < 0.12 ? 2 : 0, longHair: fem ? R() < 0.75 : R() < 0.08, sleeves: R() < 0.7, bag: R() < 0.22 ? 1 : R() < 0.45 ? 2 : 0, width: fem ? 0.9 : 1.05 };
+      const P = this.parts;
+      P.torso.setColorAt(i, col.setHex(top)); P.pelvis.setColorAt(i, col.setHex(look.skirt === 1 ? R.pick(BOTS.concat(TOPS)) : bot));
+      const skirtC = look.skirt === 2 ? R.pick([0x3b3530, 0x1b1b1d, 0x6b5a48, 0x2c3440, 0xb8a888]) : col.getHex();
+      P.skirt.setColorAt(i, col.setHex(skirtC));
+      for (const j of [i * 2, i * 2 + 1]) {
+        P.uarm.setColorAt(j, col.setHex(look.skirt === 2 ? skirtC : top)); P.farm.setColorAt(j, col.setHex(look.sleeves || look.skirt === 2 ? (look.skirt === 2 ? skirtC : top) : skinC));
+        P.thigh.setColorAt(j, col.setHex(look.skirt === 1 ? skinC : bot)); P.shin.setColorAt(j, col.setHex(look.skirt === 1 ? (R() < 0.5 ? 0x222222 : skinC) : bot));
+        P.shoe.setColorAt(j, col.setHex(R() < 0.45 ? 0xeeeeea : R.pick([0x1a1a1a, 0x5a3a24, 0x222833]))); P.hand.setColorAt(j, col.setHex(skinC));
+      }
+      P.head.setColorAt(i, col.setHex(skinC)); P.hairS.setColorAt(i, col.setHex(hair)); P.hairL.setColorAt(i, col.setHex(hair));
+      P.bag.setColorAt(i, col.setHex(R.pick([0x1a1a1a, 0x6b4a2e, 0xd8d2c4, 0x2b3a55, 0x8a1f2b])));
+      const p = { x: 0, y: 0.02, z: 0, th: 0, sp: R.range(1.15, 1.55), sc: R.range(0.92, 1.06) * (fem ? 0.95 : 1.02), ph: R() * 6, path: null, k: 0, state: 'walk', off: R.range(-1, 1), active: true, idle: R() * 6, look };
       if (i < NC) { p.kind = 'cross'; this.newInbound(p, true); }
       else if (i < NC + NA) {
         p.kind = 'amb';
@@ -157,22 +194,48 @@ export class Crowd {
         }
       }
       // write matrices
-      const near = (p.x - cx) * (p.x - cx) + (p.z - cz) * (p.z - cz) < 160 * 160;
-      const sw = moving && near ? Math.sin(p.ph) : 0;
-      const c = Math.cos(p.th), s = Math.sin(p.th), sc = p.sc;
-      const y = p.y + (moving ? Math.abs(Math.cos(p.ph)) * 0.03 : 0);
-      set(arr.torso, i, p.x, y, p.z, c, s, sc, 0, 1.16, 0, 0);
-      set(arr.head, i, p.x, y, p.z, c, s, sc, 0, 1.6, 0.01, 0);
-      set(arr.hair, i, p.x, y, p.z, c, s, sc, 0, 1.615, -0.008, 0);
-      set(arr.legL, i, p.x, y, p.z, c, s, sc, -0.11, 0.86, 0, sw * 0.5);
-      set(arr.legR, i, p.x, y, p.z, c, s, sc, 0.11, 0.86, 0, -sw * 0.5);
-      set(arr.armL, i, p.x, y, p.z, c, s, sc, -0.285, 1.43, 0, -sw * 0.4);
-      set(arr.armR, i, p.x, y, p.z, c, s, sc, 0.285, 1.43, 0, sw * 0.4);
+      const near = (p.x - cx) * (p.x - cx) + (p.z - cz) * (p.z - cz) < 170 * 170;
+      const c = Math.cos(p.th), s = Math.sin(p.th), sc = p.sc, L = p.look;
+      let hipL, hipR, kneeL, kneeR, shL, shR, elL, elR, bob;
+      if (moving && near) {
+        const sp = Math.sin(p.ph), cp = Math.cos(p.ph);
+        hipL = -0.42 * sp; hipR = 0.42 * sp;
+        kneeL = 0.1 + 0.65 * Math.max(0, cp); kneeR = 0.1 + 0.65 * Math.max(0, -cp);
+        shL = 0.3 * sp; shR = -0.3 * sp;
+        elL = -0.25 - 0.25 * Math.max(0, -sp); elR = -0.25 - 0.25 * Math.max(0, sp);
+        bob = 0.025 * Math.cos(2 * p.ph);
+      } else {
+        const sw = Math.sin(now / 1500 + p.idle) * 0.03;
+        hipL = sw; hipR = -sw; kneeL = kneeR = 0.04; shL = 0.06; shR = 0.06; elL = elR = L.bag === 2 ? -0.9 : -0.18; bob = 0;
+      }
+      const y = p.y + bob;
+      const W = L.width;
+      put(arr.torso, i, p.x, y, p.z, c, s, sc, 0, 0, 0, 0, W);
+      put(arr.pelvis, i, p.x, y, p.z, c, s, sc, 0, 0, 0, 0, W);
+      put(arr.head, i, p.x, y, p.z, c, s, sc, 0, 0, 0, 0, 1);
+      if (L.longHair) { put(arr.hairL, i, p.x, y, p.z, c, s, sc, 0, 0, 0, 0, 1); zero(arr.hairS, i); } else { put(arr.hairS, i, p.x, y, p.z, c, s, sc, 0, 0, 0, 0, 1); zero(arr.hairL, i); }
+      if (L.skirt) put(arr.skirt, i, p.x, y, p.z, c, s, sc * (L.skirt === 2 ? 1 : 0.98), 0, L.skirt === 2 ? -0.18 : 0.05, 0, 0, L.skirt === 2 ? 1.12 : 1, L.skirt === 2 ? 1.4 : 0.8); else zero(arr.skirt, i);
+      // legs: hip pivot, knee chain
+      for (const [j, sx, hip, knee] of [[i * 2, -0.095, hipL, kneeL], [i * 2 + 1, 0.095, hipR, kneeR]]) {
+        put(arr.thigh, j, p.x, y, p.z, c, s, sc, sx * W, 0.9, 0, hip, 1);
+        const ky = 0.9 - 0.44 * Math.cos(hip), kz = -0.44 * Math.sin(hip) * -1;
+        put(arr.shin, j, p.x, y, p.z, c, s, sc, sx * W, ky, -kz, hip + knee, 1);
+        put(arr.shoe, j, p.x, y, p.z, c, s, sc, sx * W, ky, -kz, hip + knee, 1);
+      }
+      for (const [j, sx, sh, el] of [[i * 2, -0.205, shL, elL], [i * 2 + 1, 0.205, shR, elR]]) {
+        put(arr.uarm, j, p.x, y, p.z, c, s, sc, sx * W, 1.415, 0, sh, 1);
+        const ey = 1.415 - 0.29 * Math.cos(sh), ez = 0.29 * Math.sin(sh);
+        put(arr.farm, j, p.x, y, p.z, c, s, sc, sx * W, ey, -ez, sh + el, 1);
+        put(arr.hand, j, p.x, y, p.z, c, s, sc, sx * W, ey, -ez, sh + el, 1);
+      }
+      if (L.bag === 1) bagBox(arr.bag, i, p.x, y, p.z, c, s, sc, 0, 1.2, -0.2, 0.3, 0.38, 0.15);
+      else if (L.bag === 2) bagBox(arr.bag, i, p.x, y, p.z, c, s, sc, 0.25 * W, 0.95, 0, 0.1, 0.28, 0.32);
+      else zero(arr.bag, i);
     }
     for (const k in P) P[k].instanceMatrix.needsUpdate = true;
     return sig;
   }
-  hide(arr, i) { for (const k in arr) { const a = arr[k]; for (let j = 0; j < 16; j++) a[i * 16 + j] = 0; } }
+  hide(arr, i) { for (const k in arr) { const a = arr[k]; const dbl = a.length > this.N * 16; for (const idx of dbl ? [i * 2, i * 2 + 1] : [i]) for (let j = 0; j < 16; j++) a[idx * 16 + j] = 0; } }
   arrive(p, go, sig) {
     if (p.kind === 'amb') { p.path.reverse(); p.k = 1; return; }
     if (p.mode === 'in') { p.state = 'wait'; if (go && sig.left > 12) this.startCross(p); return; }
@@ -184,10 +247,20 @@ export class Crowd {
   }
 }
 
-function set(a, i, x, y, z, c, s, sc, px, py, pz, phi) {
+// Instance matrix: person base (pos, yaw c/s, scale sc) * T(pivot) * Rx(phi) * S(wx, 1, wz)
+function put(a, i, x, y, z, c, s, sc, px, py, pz, phi, wx = 1, wy = 1) {
   const o = i * 16, cp = Math.cos(phi), sp = Math.sin(phi);
-  a[o] = sc * c; a[o + 1] = 0; a[o + 2] = -sc * s; a[o + 3] = 0;
-  a[o + 4] = sc * s * sp; a[o + 5] = sc * cp; a[o + 6] = sc * c * sp; a[o + 7] = 0;
+  const kx = sc * wx, ky = sc * wy;
+  a[o] = kx * c; a[o + 1] = 0; a[o + 2] = -kx * s; a[o + 3] = 0;
+  a[o + 4] = ky * s * sp; a[o + 5] = ky * cp; a[o + 6] = ky * c * sp; a[o + 7] = 0;
   a[o + 8] = sc * s * cp; a[o + 9] = -sc * sp; a[o + 10] = sc * c * cp; a[o + 11] = 0;
+  a[o + 12] = x + sc * (c * px + s * pz); a[o + 13] = y + sc * py; a[o + 14] = z + sc * (-s * px + c * pz); a[o + 15] = 1;
+}
+function zero(a, i) { a.fill(0, i * 16, i * 16 + 16); }
+function bagBox(a, i, x, y, z, c, s, sc, px, py, pz, w, h, d) {
+  const o = i * 16;
+  a[o] = sc * w * c; a[o + 1] = 0; a[o + 2] = -sc * w * s; a[o + 3] = 0;
+  a[o + 4] = 0; a[o + 5] = sc * h; a[o + 6] = 0; a[o + 7] = 0;
+  a[o + 8] = sc * d * s; a[o + 9] = 0; a[o + 10] = sc * d * c; a[o + 11] = 0;
   a[o + 12] = x + sc * (c * px + s * pz); a[o + 13] = y + sc * py; a[o + 14] = z + sc * (-s * px + c * pz); a[o + 15] = 1;
 }

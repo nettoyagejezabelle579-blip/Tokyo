@@ -33,8 +33,22 @@ function atlas(type) {
   ge.fillStyle = '#ffffff';
   if (type === 'yamanote') { ge.fillRect(30, 256 + 196, 40, 14); ge.fillRect(186, 256 + 196, 40, 14); ge.fillStyle = '#ff9a2a'; ge.fillRect(40, 256 + 30, 176, 30); }
   else { ge.beginPath(); ge.arc(56, 256 + 190, 14, 0, 7); ge.arc(200, 256 + 190, 14, 0, 7); ge.fill(); ge.fillStyle = '#ff9a2a'; ge.fillRect(60, 256 + 40, 136, 30); }
+  // roughness (G) / metalness (B)
+  const o = canvas(1024, 1024), go = o.getContext('2d');
+  const yama = type === 'yamanote';
+  go.fillStyle = yama ? 'rgb(255,95,215)' : 'rgb(255,80,20)'; go.fillRect(0, 0, 1024, 256);
+  for (const row of [0, 128]) {
+    go.fillStyle = 'rgb(255,12,150)';
+    for (let i = 0; i < D.length - 1; i++) go.fillRect(D[i] * 1024 + 40, row + 24, (D[i + 1] - D[i]) * 1024 - 80, 44);
+    go.fillRect(4, row + 24, D[0] * 1024 - 46, 44); go.fillRect(D[D.length - 1] * 1024 + 42, row + 24, 1024 - D[D.length - 1] * 1024 - 46, 44);
+  }
+  go.fillStyle = yama ? 'rgb(255,30,120)' : 'rgb(255,40,40)'; go.fillRect(0, 256, 256, 256);
+  go.fillStyle = 'rgb(255,150,120)'; go.fillRect(256, 256, 256, 256);
+  go.fillStyle = 'rgb(255,170,140)'; go.fillRect(512, 256, 256, 256);
+  go.fillStyle = 'rgb(255,160,60)'; go.fillRect(768, 256, 256, 256);
+  const orm = toTex(o, false); orm.colorSpace = THREE.NoColorSpace;
   const map = toTex(c, false), emi = toTex(e, false);
-  return new THREE.MeshLambertMaterial({ map, emissiveMap: emi, emissive: 0xffffff, emissiveIntensity: 0.25 });
+  return new THREE.MeshStandardMaterial({ map, emissiveMap: emi, emissive: 0xffffff, emissiveIntensity: 0.25, roughnessMap: orm, metalnessMap: orm, roughness: 1, metalness: 1 });
 }
 
 // uv rect helper in pixel coordinates of the 1024 atlas
@@ -68,6 +82,11 @@ function carGeo(type, mode, open) {
   const uw = w - 0.25;
   quad([uw, 0.25, l - 1], [uw, 0.25, -l + 1], [uw, h0, -l + 1], [uw, h0, l - 1], dark);
   quad([-uw, 0.25, -l + 1], [-uw, 0.25, l - 1], [-uw, h0, l - 1], [-uw, h0, -l + 1], dark);
+  // bogies: frames + wheel discs
+  for (const bz of [l - 2.6, -l + 2.6]) {
+    quad([uw - 0.15, 0.15, bz + 1.3], [uw - 0.15, 0.15, bz - 1.3], [uw - 0.15, 0.75, bz - 1.3], [uw - 0.15, 0.75, bz + 1.3], dark);
+    quad([-uw + 0.15, 0.15, bz - 1.3], [-uw + 0.15, 0.15, bz + 1.3], [-uw + 0.15, 0.75, bz + 1.3], [-uw + 0.15, 0.75, bz - 1.3], dark);
+  }
   // AC unit
   const aw = 0.9, ah = rc + 0.35;
   quad([aw, rc, 2], [aw, rc, -2], [aw, ah, -2], [aw, ah, 2], dark);
@@ -129,7 +148,7 @@ export class Rail {
   buildDoors(scene) {
     const leafGeo = new THREE.BoxGeometry(0.06, 1.25, 0.95).translate(0, 0.625, 0);
     const panelGeo = new THREE.BoxGeometry(0.12, 1.3, 1).translate(0, 0.65, 0);
-    const mk = (color) => new THREE.MeshLambertMaterial({ color });
+    const mk = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.1 });
     this.psd = [];
     const sets = [
       { line: 'yamaOuter', x: JR.platX0 + 0.15, y: JR.plat, z0: JR.platZ0, z1: JR.platZ1, stop: (i) => -97 + 20 * i, n: 11, offs: [-7.6, -2.6, 2.6, 7.6], col: 0x80c241 },
@@ -174,7 +193,7 @@ export class Rail {
     const mkMesh = (board, w, h, x, y, z, ry) => {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: board.tex }));
       m.position.set(x, y, z); m.rotation.y = ry; scene.add(m);
-      const back = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, h + 0.2, 0.2), new THREE.MeshLambertMaterial({ color: 0x2a2c30 }));
+      const back = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, h + 0.2, 0.2), new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.4, metalness: 0.6 }));
       back.position.set(x - Math.sin(ry) * 0.11, y, z - Math.cos(ry) * 0.11); back.rotation.y = ry; scene.add(back);
       return m;
     };
@@ -197,8 +216,9 @@ export class Rail {
   }
 
   drawBoards(now, force) {
-    if (!force && now - this.lastBoard < 1000) return;
-    this.lastBoard = now;
+    const rt = performance.now();
+    if (!force && rt - this.lastBoard < 1000) return;
+    this.lastBoard = rt;
     const en = Math.floor(now / 5000) % 2 === 1;
     const rows = (line, n) => departures(line, now - 5000, now + 8 * 3600e3).filter((d) => d.t > now - 5000).slice(0, n).map((d) => ({
       time: hhmm(d.t), dest: d.dest, destEn: d.destEn.replace('Yamanote Line ', '').replace('Ginza Line ', ''),

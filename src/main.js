@@ -12,6 +12,7 @@ import { TRAVEL, JR, GZ } from './layout.js';
 import { jst, hhmmss } from './time.js';
 import { LINES } from './timetable.js';
 import { smooth } from './util.js';
+import { Post } from './render.js';
 
 const $ = (id) => document.getElementById(id);
 const mobile = matchMedia('(pointer: coarse)').matches || /Mobi|Android|iPhone|iPad/.test(navigator.userAgent);
@@ -25,11 +26,12 @@ async function fonts() {
 
 async function boot(saved) {
   await fonts();
-  const renderer = new THREE.WebGLRenderer({ antialias: !mobile, powerPreference: 'high-performance' });
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
   let quality = mobile ? 'low' : 'high';
   const applyQuality = () => {
-    renderer.setPixelRatio(Math.min(devicePixelRatio, quality === 'high' ? 2 : 1.25));
+    renderer.setPixelRatio(Math.min(devicePixelRatio, quality === 'high' ? 1.75 : 1.25));
     renderer.shadowMap.enabled = quality === 'high' || !mobile;
+    post.setQuality(quality);
     sky.dir.shadow.mapSize.setScalar(quality === 'high' ? 2048 : 1024);
     if (sky.dir.shadow.map) { sky.dir.shadow.map.dispose(); sky.dir.shadow.map = null; }
     scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => (m.needsUpdate = true)); });
@@ -37,17 +39,19 @@ async function boot(saved) {
   };
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.0;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   $('app').appendChild(renderer.domElement);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.15, 16000);
-  const resize = () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); };
+  let post = null;
+  const resize = () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); post?.setSize(innerWidth, innerHeight); };
   addEventListener('resize', resize); resize();
 
   const phys = new Phys();
   const world = buildWorld(scene, phys);
   const sky = new Sky(scene, renderer);
+  post = new Post(renderer, scene, camera);
   applyQuality();
   const rail = new Rail(scene, world);
   const crowd = new Crowd(scene, mobile);
@@ -126,12 +130,12 @@ async function boot(saved) {
     sky.update(t, camera.position, dt, 0.35);
     const night = sky.night;
     sky.dir.castShadow = renderer.shadowMap.enabled && night < 0.85;
-    for (const m of world.winMats) m.emissiveIntensity = night * 0.85;
-    for (const m of world.shopMats) m.emissiveIntensity = 0.22 + night * 0.9;
-    for (const m of world.signMats) m.color.setScalar(0.82 + night * 0.25);
+    for (const m of world.winMats) m.emissiveIntensity = night * 0.75;
+    for (const m of world.shopMats) m.emissiveIntensity = 0.12 + night * 0.42;
+    for (const m of world.signMats) m.color.setScalar(0.8 - night * 0.1);
     world.pools.opacity = night * 0.85;
-    for (const m of world.groundMats) m.emissiveIntensity = night * 0.32;
-    world.M.platform.emissiveIntensity = night * 0.5;
+    for (const m of world.groundMats) m.emissiveIntensity = night * 0.22;
+    world.M.platform.emissiveIntensity = night * 0.35;
     for (const b of world.beaconMeshes) b.visible = night > 0.3 && (performance.now() % 1500) < 750;
     world.M.glow.color.setScalar(0.8 + night * 0.6);
     world.M.ceiling.emissiveIntensity = 0.35 + night * 0.3;
@@ -195,11 +199,11 @@ async function boot(saved) {
       const yd = $('youDot');
       yd.style.left = ((pp.x + 480) / 960 * 100) + '%'; yd.style.top = ((pp.z + 490) / 1090 * 100) + '%';
     }
-    renderer.render(scene, camera);
+    post.render(night, dt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  window.__shibuya = { player, rail, scene, renderer, camera, setOffset, travel, sky, world };
+  window.__shibuya = { player, rail, scene, renderer, camera, setOffset, travel, sky, world, post };
 }
 
 const hot = window.claude?.hot;

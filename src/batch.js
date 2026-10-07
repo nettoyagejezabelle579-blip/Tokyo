@@ -66,6 +66,17 @@ export class Batch {
       this.quad(o.bottom, a, b, cc, d, [0, 0, 1, 0, 1, 1, 0, 1], col);
     }
   }
+  // Vertical prism (cylinder approximation) with a cap
+  cyl(key, x, y0, z, r, h, n = 10, col, capKey) {
+    const P = (i, y) => [x + Math.cos(i / n * Math.PI * 2) * r, y, z - Math.sin(i / n * Math.PI * 2) * r];
+    const circ = 2 * Math.PI * r;
+    for (let i = 0; i < n; i++) {
+      const u0 = (i / n) * circ / 4, u1 = ((i + 1) / n) * circ / 4;
+      this.quad(key, P(i, y0), P(i + 1, y0), P(i + 1, y0 + h), P(i, y0 + h), [u0, y0 / 4, u1, y0 / 4, u1, (y0 + h) / 4, u0, (y0 + h) / 4], col);
+    }
+    const c = [x, y0 + h, z];
+    for (let i = 0; i < n; i += 2) this.quad(capKey || key, c, P(i, y0 + h), P(i + 1, y0 + h), P(i + 2, y0 + h), [0.5, 0.5, 1, 0.5, 1, 1, 0.5, 1], col);
+  }
   // Vertical quad from (x0,z0) to (x1,z1), facing left of the direction of travel
   wall(key, x0, z0, x1, z1, y0, y1, uv, col) {
     this.quad(key, [x0, y0, z0], [x1, y0, z1], [x1, y1, z1], [x0, y1, z0], uv, col);

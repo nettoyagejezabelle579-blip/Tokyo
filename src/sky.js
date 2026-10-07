@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { sun, moon } from './time.js';
 import { rng, smooth, lerp } from './util.js';
-import { facades } from './textures.js';
+import { facades } from './pbr.js';
 
 const VS = `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = modelViewMatrix*vec4(position,1.0); gl_Position = projectionMatrix*p; gl_Position.z = gl_Position.w; }`;
 const FS = `
@@ -13,7 +13,9 @@ float fbm(vec2 p){ float a=0.5, s=0.; for(int i=0;i<5;i++){ s+=a*n(p); p*=2.03; 
 void main(){
   vec3 d = normalize(vDir);
   float y = max(d.y, 0.0);
-  vec3 col = mix(uHor, uZen, pow(y, 0.55));
+  vec3 col = mix(uHor, uZen, pow(y, 0.48));
+  // below the horizon: darker haze (seen in reflections)
+  if (d.y < 0.0) col = mix(uHor, uHor * vec3(0.42, 0.42, 0.44), smoothstep(0.0, 0.25, -d.y));
   // city glow at night near the horizon
   col += vec3(0.32,0.17,0.08) * uNight * pow(1.0 - y, 6.0) * 0.6;
   float sd = max(dot(d, uSun), 0.0);
@@ -48,18 +50,27 @@ export class Sky {
       uZen: { value: new THREE.Color() }, uHor: { value: new THREE.Color() }, uSunCol: { value: new THREE.Color() },
       uNight: { value: 0 }, uTime: { value: 0 }, uCloud: { value: 0.5 }, uMoonPhase: { value: 0.5 },
     };
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(15000, 32, 16), new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: FS, uniforms: this.uni, side: THREE.BackSide, depthWrite: false, fog: false }));
-    dome.renderOrder = -1; dome.frustumCulled = false;
+    const skyMat = new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: FS, uniforms: this.uni, side: THREE.BackSide, depthWrite: false, fog: false });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(15000, 32, 16), skyMat);
+    dome.renderOrder = -1; dome.frustumCulled = false; dome.userData.noAO = true;
     scene.add(dome); this.dome = dome;
+    // environment (image based lighting) captured from the sky + a city-coloured ground
+    this.pmrem = new THREE.PMREMGenerator(renderer);
+    this.envScene = new THREE.Scene();
+    const envDome = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), new THREE.ShaderMaterial({ vertexShader: VS.replace('gl_Position.z = gl_Position.w;', ''), fragmentShader: FS, uniforms: this.uni, side: THREE.BackSide, depthWrite: false }));
+    this.envScene.add(envDome);
+    this.envGround = new THREE.Mesh(new THREE.CircleGeometry(48, 32).rotateX(-Math.PI / 2).translate(0, -2, 0), new THREE.MeshBasicMaterial({ color: 0x5a5854 }));
+    this.envScene.add(this.envGround);
+    this.envAt = -1e9; this.envEl = 999; this.scene = scene;
 
-    this.hemi = new THREE.HemisphereLight(0xcfe3ff, 0x6b6257, 1.0);
+    this.hemi = new THREE.HemisphereLight(0xcfe3ff, 0x6b6257, 0.4);
     scene.add(this.hemi);
     this.dir = new THREE.DirectionalLight(0xffffff, 2.5);
     this.dir.castShadow = true;
     const sc = this.dir.shadow.camera;
     sc.left = -110; sc.right = 110; sc.top = 110; sc.bottom = -110; sc.near = 1; sc.far = 900;
     this.dir.shadow.mapSize.set(2048, 2048);
-    this.dir.shadow.bias = -0.0004; this.dir.shadow.normalBias = 0.06;
+    this.dir.shadow.bias = -0.0003; this.dir.shadow.normalBias = 0.05; this.dir.shadow.radius = 2;
     scene.add(this.dir); scene.add(this.dir.target);
     scene.fog = new THREE.FogExp2(0xc8d6e0, 0.0011);
     this.buildFar(scene);
@@ -72,11 +83,21 @@ export class Sky {
     const F = facades();
     // distant city: instanced boxes in a ring around the playable area
     const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
-    const map = F.concrete.map.clone(); map.repeat.set(2, 4); map.needsUpdate = true;
-    const emi = F.concrete.emi.clone(); emi.repeat.set(2, 4); emi.needsUpdate = true;
-    this.farMat = new THREE.MeshLambertMaterial({ map, emissiveMap: emi, emissive: 0xffffff, emissiveIntensity: 0 });
+    const rep = (t) => { const c = t.clone(); c.repeat.set(2, 4); c.needsUpdate = true; return c; };
+    const fs = F.concrete;
+    this.farMat = new THREE.MeshStandardMaterial({ map: rep(fs.map), normalMap: rep(fs.normal), roughnessMap: rep(fs.orm), metalnessMap: rep(fs.orm), roughness: 1, metalness: 1, emissiveMap: rep(fs.emi), emissive: 0xffffff, emissiveIntensity: 0 });
     const N = 4200;
-    const im = new THREE.InstancedMesh(geo, this.farMat, N);
+    // rooftops seen from above: concrete with plant, tanks and billboards
+    const rc = document.createElement('canvas'); rc.width = rc.height = 256;
+    { const g = rc.getContext('2d'); g.fillStyle = '#8e8f90'; g.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 2000; i++) { g.fillStyle = `rgba(${R() < 0.5 ? '0,0,0' : '255,255,255'},${R() * 0.12})`; g.fillRect(R() * 256, R() * 256, 3, 3); }
+      g.strokeStyle = '#c9c9c6'; g.lineWidth = 10; g.strokeRect(5, 5, 246, 246);
+      for (let i = 0; i < 7; i++) { g.fillStyle = R() < 0.5 ? '#d9d9d6' : '#6f7275'; g.fillRect(30 + R() * 170, 30 + R() * 170, 18 + R() * 40, 14 + R() * 30); }
+      g.fillStyle = '#b8bcc0'; g.beginPath(); g.arc(70 + R() * 100, 70 + R() * 100, 16, 0, 7); g.fill(); }
+    const roofTex = new THREE.CanvasTexture(rc); roofTex.colorSpace = THREE.SRGBColorSpace;
+    this.roofMat = new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.9 });
+    const sideM = this.farMat;
+    const im = new THREE.InstancedMesh(geo, [sideM, sideM, this.roofMat, this.roofMat, sideM, sideM], N);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), c = new THREE.Color();
     let k = 0;
     while (k < N) {
@@ -84,11 +105,12 @@ export class Sky {
       const x = Math.cos(a) * r, z = Math.sin(a) * r + 50;
       if (x > -480 && x < 480 && z > -490 && z < 600) continue;
       const w = 12 + R() * 30, d = 12 + R() * 30;
-      let h = 8 + Math.pow(R(), 2.2) * 60;
+      let h = 6 + Math.pow(R(), 2.6) * 55;
       if (R() < 0.03) h = 80 + R() * 90;
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), R() < 0.6 ? 0 : R());
       im.setMatrixAt(k, m.compose(p.set(x, 0, z), q, s.set(w, h, d)));
-      const v = 0.75 + R() * 0.3; im.setColorAt(k, c.setRGB(v, v * 0.98, v * 0.95));
+      const pal = [[0.92, 0.9, 0.86], [0.8, 0.78, 0.74], [0.7, 0.66, 0.6], [0.95, 0.95, 0.95], [0.62, 0.6, 0.6], [0.78, 0.72, 0.64], [0.55, 0.6, 0.68]][Math.floor(R() * 7)];
+      const v = 0.85 + R() * 0.25; im.setColorAt(k, c.setRGB(pal[0] * v, pal[1] * v, pal[2] * v));
       k++;
     }
     im.receiveShadow = false; im.castShadow = false;
@@ -172,7 +194,7 @@ export class Sky {
     u.uCloud.value = wx;
     const day = { zen: new THREE.Color(0x3d7fd6), hor: new THREE.Color(0xbcd6ea) };
     const nite = { zen: new THREE.Color(0x050a1a), hor: new THREE.Color(0x1d2236) };
-    const dusk = { zen: new THREE.Color(0x2c4f8a), hor: new THREE.Color(0xf0a070) };
+    const dusk = { zen: new THREE.Color(0x46709f), hor: new THREE.Color(0xe9b48c) };
     const zen = day.zen.clone().lerp(dusk.zen, golden).lerp(nite.zen, night);
     const hor = day.hor.clone().lerp(dusk.hor, golden).lerp(nite.hor, night);
     u.uZen.value.copy(zen); u.uHor.value.copy(hor);
@@ -185,7 +207,7 @@ export class Sky {
     const L = this.dir;
     if (sunUp > 0.05) {
       L.color.setRGB(1, lerp(0.97, 0.7, golden), lerp(0.92, 0.5, golden));
-      L.intensity = 2.8 * sunUp * (1 - wx * 0.45);
+      L.intensity = 3.2 * sunUp * (1 - wx * 0.45);
       L.position.copy(camPos).addScaledVector(this.sunDir, 400);
     } else {
       L.color.setRGB(0.6, 0.7, 1.0);
@@ -196,7 +218,16 @@ export class Sky {
     // snap shadow camera to texels to reduce shimmering
     L.target.position.x = Math.round(L.target.position.x / 2) * 2; L.target.position.z = Math.round(L.target.position.z / 2) * 2;
     L.position.x += L.target.position.x - camPos.x; L.position.z += L.target.position.z - camPos.z;
-    this.hemi.intensity = lerp(1.05, 0.62, night) * (1 - wx * 0.15);
+    this.hemi.intensity = lerp(0.42, 0.5, night) * (1 - wx * 0.15);
+    // refresh the environment map when the light changes noticeably
+    if (Math.abs(el - this.envEl) > 0.7 || now - this.envAt > 120000 || now < this.envAt) {
+      this.envEl = el; this.envAt = now;
+      this.envGround.material.color.setRGB(lerp(0.36, 0.06, night), lerp(0.35, 0.055, night), lerp(0.33, 0.05, night));
+      const rt = this.pmrem.fromScene(this.envScene, 0.02, 0.1, 200);
+      if (this.envRT) this.envRT.dispose();
+      this.envRT = rt; this.scene.environment = rt.texture;
+    }
+    this.scene.environmentIntensity = lerp(1.0, 0.55, night) * (1 - 0.25 * golden);
     this.hemi.color.copy(zen).lerp(new THREE.Color(0xffffff), 0.5);
     this.hemi.groundColor.setRGB(lerp(0.45, 0.55, night), lerp(0.42, 0.4, night), lerp(0.38, 0.28, night));
     if (night > 0.5) this.hemi.color.lerp(new THREE.Color(0x6a6f8a), night - 0.5);

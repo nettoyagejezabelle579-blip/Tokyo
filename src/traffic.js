@@ -2,45 +2,107 @@ import * as THREE from 'three';
 import { rng } from './util.js';
 import { scramblePhase, twoPhase, ROADS } from './layout.js';
 import { canvas, toTex } from './textures.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const R = rng(777);
 
-// ---------- vehicle geometry (vertex coloured boxes; white parts take the instance colour) ----------
-function geoFrom(boxes) {
-  const pos = [], col = [], nor = [];
-  for (const [x0, y0, z0, x1, y1, z1, c] of boxes) {
-    const cc = new THREE.Color(c);
-    const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0).translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2).toNonIndexed();
-    const p = g.attributes.position, n = g.attributes.normal;
-    for (let i = 0; i < p.count; i++) { pos.push(p.getX(i), p.getY(i), p.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i)); col.push(cc.r, cc.g, cc.b); }
-  }
+// ---------- vehicle geometry: side-profile extrusions with bevelled edges ----------
+const ni = (g) => (g.index ? g.toNonIndexed() : g);
+const strip = (g) => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k); g.clearGroups(); return g; };
+function extrude(pts, width, bevel = 0.06) {
+  const sh = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+  const g = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 6 });
+  g.rotateY(-Math.PI / 2); g.translate((width - bevel * 2) / 2, 0, 0);
+  return strip(ni(g));
+}
+function quad(a, b, c, d) {
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const p = [a, b, c, a, c, d].flat();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1], 2));
+  g.computeVertexNormals();
   return g;
 }
-const W = 0xffffff, GL = 0x1c232b, TY = 0x111111;
-function wheels(L, Wd, r = 0.33) {
+// glass panel following a profile segment (x along car length), spanning the width
+function glassSeg(p0, p1, hw, out = 0.012) {
+  const dx = p1[0] - p0[0], dy = p1[1] - p0[1], L = Math.hypot(dx, dy), nx = -dy / L * out, ny = dx / L * out;
+  const A = (pp, x) => [x, pp[1] + ny, pp[0] + nx];
+  return quad(A(p0, -hw), A(p0, hw), A(p1, hw), A(p1, -hw));
+}
+function sideWindows(pts, hw) {
+  const sh = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
   const out = [];
-  for (const z of [L / 2 - 0.85, -L / 2 + 0.85]) for (const x of [-Wd / 2 + 0.05, Wd / 2 - 0.25]) out.push([x, 0, z - r, x + 0.2, r * 2, z + r, TY]);
+  for (const sd of [-1, 1]) {
+    const g = ni(new THREE.ShapeGeometry(sh));
+    g.rotateY(sd > 0 ? -Math.PI / 2 : Math.PI / 2); g.translate(sd * hw, 0, 0);
+    out.push(strip(g));
+  }
   return out;
 }
-const TYPES = {
-  taxi: { L: 4.4, w: 1.7, body: () => [[-0.85, 0.3, -2.2, 0.85, 1.0, 2.2, W], [-0.8, 1.0, -1.4, 0.8, 1.68, 1.5, GL], [-0.82, 1.0, -1.45, 0.82, 1.06, 1.55, W], [-0.78, 1.68, -1.35, 0.78, 1.74, 1.4, W], [-0.2, 1.74, 0.1, 0.2, 1.92, 0.35, 0xffd76a], ...wheels(4.4, 1.7)], colors: [0x1d2847, 0x1d2847, 0x1d2847, 0x111111, 0xf2c200, 0x2e7d32], v: 11, lights: [1.7, 0.75] },
-  sedan: { L: 4.7, w: 1.8, body: () => [[-0.9, 0.3, -2.35, 0.9, 0.95, 2.35, W], [-0.82, 0.95, -1.2, 0.82, 1.45, 1.1, GL], [-0.78, 1.45, -1.1, 0.78, 1.5, 1.0, W], ...wheels(4.7, 1.8)], colors: [0xf4f4f4, 0x161616, 0xb9bcc0, 0x7a7e84, 0x23314f, 0x8d1c23], v: 12, lights: [1.8, 0.7] },
-  van: { L: 3.4, w: 1.48, body: () => [[-0.74, 0.3, -1.7, 0.74, 1.9, 1.7, W], [-0.75, 1.0, 1.0, 0.75, 1.75, 1.72, GL], [-0.75, 1.05, -1.0, 0.75, 1.6, 0.9, GL], ...wheels(3.4, 1.48, 0.28)], colors: [0xf4f4f4, 0xf4f4f4, 0xdfe3e6], v: 10, lights: [1.4, 0.8] },
-  bus: { L: 10.5, w: 2.5, body: () => [[-1.25, 0.35, -5.25, 1.25, 3.1, 5.25, W], [-1.27, 1.45, -4.6, 1.27, 2.55, 5.27, GL], [-1.27, 0.75, -5.27, 1.27, 0.95, 5.27, 0xc8102e], [-1.27, 2.6, -5.27, 1.27, 2.68, 5.27, 0xc8102e], ...wheels(10.5, 2.5, 0.48)], colors: [0xf7f7f7], v: 10, lights: [2.3, 0.9] },
-  truck: { L: 7.2, w: 2.2, body: () => [[-1.1, 0.4, 1.6, 1.1, 2.6, 3.6, W], [-1.1, 1.6, 2.4, 1.1, 2.4, 3.62, GL], [-1.1, 0.7, -3.6, 1.1, 3.2, 1.5, 0xe8e8e8], ...wheels(7.2, 2.2, 0.45)], colors: [0x2d5aa0, 0xf4f4f4, 0x2e7d32, 0xd0d0d0], v: 10, lights: [2.0, 0.9] },
-};
-
-function lightGeo(T) {
-  const L = T.L / 2, hw = T.lights[0] / 2, y = T.lights[1];
-  return geoFrom([
-    [-hw, y, L - 0.02, -hw + 0.3, y + 0.14, L + 0.04, 0xfff2cc], [hw - 0.3, y, L - 0.02, hw, y + 0.14, L + 0.04, 0xfff2cc],
-    [-hw, y, -L - 0.04, -hw + 0.28, y + 0.14, -L + 0.02, 0xff2a1a], [hw - 0.28, y, -L - 0.04, hw, y + 0.14, -L + 0.02, 0xff2a1a],
-  ]);
+function wheelSet(L, W, r, xs) {
+  const tire = [], rim = [];
+  for (const z of xs) for (const sd of [-1, 1]) {
+    tire.push(strip(ni(new THREE.CylinderGeometry(r, r, 0.22, 16).rotateZ(Math.PI / 2).translate(sd * (W / 2 - 0.12), r, z))));
+    rim.push(strip(ni(new THREE.CylinderGeometry(r * 0.62, r * 0.62, 0.05, 12).rotateZ(Math.PI / 2).translate(sd * (W / 2 - 0.005), r, z))));
+  }
+  return { tire, rim };
 }
+const box = (x0, y0, z0, x1, y1, z1) => strip(ni(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0).translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2)));
+const colorize = (g, hex) => { const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g; };
+
+function carParts(T) {
+  const { L, w, prof, win, front, rear, wheelR, wheelX } = T;
+  const hw = w / 2;
+  const paint = [extrude(prof, w)];
+  const glass = [...sideWindows(win, hw + 0.004)];
+  if (front) glass.push(glassSeg(front[0], front[1], hw - 0.1));
+  if (rear) glass.push(glassSeg(rear[0], rear[1], hw - 0.1));
+  const { tire, rim } = wheelSet(L, w, wheelR, wheelX);
+  const dark = [...tire, box(-hw + 0.05, 0.2, L / 2 - 0.05, hw - 0.05, 0.42, L / 2 + 0.04), box(-hw + 0.05, 0.2, -L / 2 - 0.04, hw - 0.05, 0.42, -L / 2 + 0.05)];
+  const ly = T.lightY;
+  const lights = [
+    colorize(box(-hw + 0.08, ly, L / 2 - 0.02, -hw + 0.42, ly + 0.12, L / 2 + 0.05), 0xfff3d6), colorize(box(hw - 0.42, ly, L / 2 - 0.02, hw - 0.08, ly + 0.12, L / 2 + 0.05), 0xfff3d6),
+    colorize(box(-hw + 0.08, ly + 0.1, -L / 2 - 0.05, -hw + 0.38, ly + 0.24, -L / 2 + 0.02), 0xff2a14), colorize(box(hw - 0.38, ly + 0.1, -L / 2 - 0.05, hw - 0.08, ly + 0.24, -L / 2 + 0.02), 0xff2a14),
+  ];
+  if (T.extra) T.extra({ paint, glass, dark, rim, lights });
+  return { paint: mergeGeometries(paint), glass: mergeGeometries(glass), dark: mergeGeometries(dark), rim: mergeGeometries(rim), lights: mergeGeometries(lights) };
+}
+
+const TYPES = {
+  taxi: {
+    L: 4.4, w: 1.7, wheelR: 0.31, wheelX: [1.35, -1.4], lightY: 0.72, v: 11,
+    prof: [[-2.2, 0.3], [-2.22, 0.92], [-2.08, 1.06], [-1.98, 1.68], [-1.85, 1.75], [0.45, 1.76], [1.25, 1.1], [2.08, 0.96], [2.2, 0.62], [2.18, 0.3]],
+    win: [[-1.9, 1.1], [-1.82, 1.64], [0.42, 1.67], [1.15, 1.12]], front: [[0.45, 1.76], [1.25, 1.1]], rear: [[-2.08, 1.06], [-1.98, 1.68]],
+    colors: [0x1b2440, 0x1b2440, 0x1b2440, 0x1b2440, 0x111111, 0xd9b400, 0x2a6a3a],
+    extra: (p) => { p.lights.push(colorize(box(-0.22, 1.76, 0.0, 0.22, 1.95, 0.3), 0xfff0b0)); p.dark.push(box(-0.86, 0.95, -2.0, 0.86, 1.0, 1.9)); },
+  },
+  sedan: {
+    L: 4.6, w: 1.76, wheelR: 0.31, wheelX: [1.4, -1.35], lightY: 0.72, v: 12,
+    prof: [[-2.3, 0.32], [-2.33, 0.75], [-2.1, 0.96], [-1.55, 1.0], [-0.6, 1.44], [0.35, 1.46], [1.2, 1.0], [2.15, 0.82], [2.32, 0.6], [2.3, 0.32]],
+    win: [[-1.42, 1.03], [-0.62, 1.39], [0.32, 1.41], [1.08, 1.03]], front: [[0.35, 1.46], [1.2, 1.0]], rear: [[-1.55, 1.0], [-0.6, 1.44]],
+    colors: [0xf2f2f2, 0x151515, 0xb8bcc0, 0x7d8288, 0x22314f, 0x8d1c23, 0xe8e8e8],
+  },
+  van: {
+    L: 3.4, w: 1.48, wheelR: 0.27, wheelX: [1.05, -1.15], lightY: 0.78, v: 10,
+    prof: [[-1.7, 0.3], [-1.7, 1.86], [-1.6, 1.9], [1.2, 1.9], [1.6, 1.18], [1.7, 0.92], [1.7, 0.3]],
+    win: [[-1.55, 1.18], [-1.55, 1.76], [1.15, 1.78], [1.48, 1.18]], front: [[1.2, 1.9], [1.6, 1.18]], rear: null,
+    colors: [0xf4f4f4, 0xf4f4f4, 0xdfe3e6, 0x9fb7c9],
+  },
+  bus: {
+    L: 10.5, w: 2.49, wheelR: 0.48, wheelX: [3.0, -2.7], lightY: 0.75, v: 10,
+    prof: [[-5.25, 0.35], [-5.25, 3.0], [-5.1, 3.12], [5.1, 3.12], [5.25, 2.95], [5.25, 0.35]],
+    win: [[-5.0, 1.42], [-5.0, 2.62], [5.0, 2.66], [5.1, 1.1]], front: [[5.27, 2.85], [5.27, 1.05]], rear: null,
+    colors: [0xf7f7f7],
+    extra: (p) => { p.lights.push(colorize(box(-1.2, 2.72, 5.2, 1.2, 2.95, 5.3), 0xff9a2a)); p.dark.push(box(-1.256, 0.8, -5.0, -1.25, 0.95, 5.0), box(1.25, 0.8, -5.0, 1.256, 0.95, 5.0)); },
+  },
+  truck: {
+    L: 7.2, w: 2.2, wheelR: 0.45, wheelX: [2.6, -1.6, -2.6], lightY: 0.8, v: 10,
+    prof: [[1.45, 0.45], [1.45, 2.65], [3.3, 2.65], [3.6, 1.9], [3.6, 0.45]],
+    win: [[1.7, 1.75], [1.7, 2.5], [3.2, 2.5], [3.45, 1.75]], front: [[3.3, 2.65], [3.6, 1.9]], rear: null,
+    colors: [0x2d5aa0, 0xf4f4f4, 0x2e7d32, 0xd0d0d0],
+    extra: (p) => { p.dark.push(box(-1.1, 0.55, -3.6, 1.1, 0.75, 1.4)); p.rim.push(box(-1.1, 0.75, -3.6, 1.1, 3.25, 1.35)); },
+  },
+};
 
 // ---------- routes ----------
 function poly(pts) {
@@ -88,7 +150,12 @@ void dog;
 export class Traffic {
   constructor(scene, mobile) {
     this.meshes = {};
-    const bodyMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const MAT = {
+      paint: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.22, metalness: 0.55 }),
+      glass: new THREE.MeshStandardMaterial({ color: 0x0b1015, roughness: 0.03, metalness: 0.9, side: THREE.DoubleSide }),
+      dark: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.7 }),
+      rim: new THREE.MeshStandardMaterial({ color: 0xd2d6da, roughness: 0.25, metalness: 0.9 }),
+    };
     this.lightMat = new THREE.MeshBasicMaterial({ vertexColors: true });
     const cap = mobile ? 0.7 : 1;
     this.routes = ROUTES.map((r) => ({ ...r, ...poly(r.p), y: r.y || 0, v: r.v || 11, n: Math.max(2, Math.round(r.n * cap)), veh: [] }));
@@ -118,14 +185,16 @@ export class Traffic {
     }
     for (const t in TYPES) {
       const n = counts[t] || 1;
-      const T = TYPES[t];
-      const body = new THREE.InstancedMesh(geoFrom(T.body()), bodyMat, n);
-      const lights = new THREE.InstancedMesh(lightGeo(T), this.lightMat, n);
-      body.castShadow = true; body.receiveShadow = true;
-      body.instanceMatrix.setUsage(THREE.DynamicDrawUsage); lights.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      body.frustumCulled = lights.frustumCulled = false;
-      scene.add(body); scene.add(lights);
-      this.meshes[t] = { body, lights };
+      const G = carParts(TYPES[t]);
+      const set = {};
+      for (const k of ['paint', 'glass', 'dark', 'rim', 'lights']) {
+        const m = new THREE.InstancedMesh(G[k], k === 'lights' ? this.lightMat : MAT[k], n);
+        m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false;
+        m.castShadow = k === 'paint'; m.receiveShadow = k === 'paint';
+        scene.add(m); set[k] = m;
+      }
+      set.body = set.paint;
+      this.meshes[t] = set;
     }
     const c = new THREE.Color();
     for (const v of vehicles) this.meshes[v.type].body.setColorAt(v.idx, c.setHex(v.color));
@@ -177,11 +246,11 @@ export class Traffic {
         const [x, z, h] = this.at(r, v.s);
         q.setFromAxisAngle(ax, h);
         m4.compose(p.set(x, r.y + 0.02, z), q, sc);
-        this.meshes[v.type].body.setMatrixAt(v.idx, m4);
-        this.meshes[v.type].lights.setMatrixAt(v.idx, m4);
+        const ms = this.meshes[v.type];
+        for (const k of ['paint', 'glass', 'dark', 'rim', 'lights']) ms[k].setMatrixAt(v.idx, m4);
       }
     }
-    for (const t in this.meshes) { this.meshes[t].body.instanceMatrix.needsUpdate = true; this.meshes[t].lights.instanceMatrix.needsUpdate = true; }
+    for (const t in this.meshes) for (const k of ['paint', 'glass', 'dark', 'rim', 'lights']) this.meshes[t][k].instanceMatrix.needsUpdate = true;
     this.lightMat.color.setScalar(0.55 + night * 0.9);
     this.updateSignals(S, now);
     return S;
@@ -192,8 +261,8 @@ export class Traffic {
     const mk = (c) => new THREE.MeshBasicMaterial({ color: c });
     this.sigMats = {};
     for (const g of ['XNS', 'XEW', 'MA', 'MB', 'RA', 'RB']) this.sigMats[g] = { g: mk(0x00e0b0), y: mk(0xffb000), r: mk(0xff2a2a) };
-    const housing = new THREE.MeshLambertMaterial({ color: 0x3a3d42 });
-    const pole = new THREE.MeshLambertMaterial({ color: 0x8a9096 });
+    const housing = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.5, metalness: 0.4 });
+    const pole = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.35, metalness: 0.8 });
     const carSignal = (x, z, ry, grp, armLen = 3) => {
       const g = new THREE.Group();
       const pm = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 6.2, 8).translate(0, 3.1, 0), pole); g.add(pm);

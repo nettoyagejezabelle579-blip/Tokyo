@@ -100,8 +100,9 @@ export class Hud {
       pill.dataset.state = sig.ped;
       pill.textContent = sig.ped === 'go' ? `歩行者 青  ·  あと ${t}秒  Walk` : sig.ped === 'blink' ? `点滅  ·  渡らないで  Don't start` : `歩行者 赤  ·  青まで ${t}秒  Wait`;
     }
-    if (now - this.lastSlow < 250) return;
-    this.lastSlow = now;
+    const rt = performance.now();
+    if (rt - this.lastSlow < 250) return;
+    this.lastSlow = rt;
     $('clock').textContent = hhmmss(now);
     const sd = serviceDay(now);
     $('date').textContent = `${dateLabel(now)} · ${sd.holiday ? '土休日ダイヤ' : '平日ダイヤ'}`;

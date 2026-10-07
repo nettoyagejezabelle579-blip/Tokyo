@@ -30,4 +30,6 @@ The menu has fast travel, a time slider (look at another hour; LIVE snaps back) 
 
 ## Code
 
-`src/` — `layout.js` (map, signal cycle, Ginza curve), `world.js` (city), `rail.js` (trains, platform doors, departure boards), `timetable.js`, `crowd.js`, `traffic.js`, `sky.js`, `player.js`, `hud.js`, `audio.js`, `main.js`. Three.js r169 is vendored in `vendor/` (MIT).
+`src/` — `layout.js` (map, signal cycle, Ginza curve), `world.js` (city), `pbr.js` (procedural PBR textures: albedo, normal, roughness/metal, night emissive), `render.js` (ambient occlusion, bloom, tone mapping), `rail.js` (trains, platform doors, departure boards), `timetable.js`, `crowd.js` (jointed pedestrians), `traffic.js` (extruded vehicles), `sky.js` (sky, sun/moon, image-based lighting), `player.js`, `hud.js`, `audio.js`, `main.js`. Three.js r169 and the addons it needs are vendored in `vendor/` (MIT).
+
+Rendering: physically based materials lit by the sun and a sky environment map, soft shadows, GTAO ambient occlusion, MSAA and bloom on desktop. Phones use a lighter preset (no AO/MSAA); switch with the menu's quality buttons.
