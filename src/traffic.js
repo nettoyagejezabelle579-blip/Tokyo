@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { rng } from './util.js';
-import { scramblePhase, twoPhase, ROADS } from './layout.js';
+import { scramblePhase, twoPhase, ROAD_LINES, SCRAMBLE_STOP, CROSSWALKS, smoothPts } from './geo.js';
 import { canvas, toTex } from './textures.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -104,51 +104,43 @@ const TYPES = {
   },
 };
 
-// ---------- routes ----------
+// ---------- routes: lanes offset from the real road centre lines (keep left) ----------
 function poly(pts) {
-  const out = [];
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i];
-    if (p.curve) { // quadratic curve from previous point via control to p
-      const a = out[out.length - 1];
-      for (let k = 1; k <= 10; k++) { const t = k / 10; out.push([(1 - t) * (1 - t) * a[0] + 2 * (1 - t) * t * p.c[0] + t * t * p[0], (1 - t) * (1 - t) * a[1] + 2 * (1 - t) * t * p.c[1] + t * t * p[1]]); }
-    } else out.push(p);
-  }
   const cum = [0];
-  for (let i = 1; i < out.length; i++) cum.push(cum[i - 1] + Math.hypot(out[i][0] - out[i - 1][0], out[i][1] - out[i - 1][1]));
-  return { pts: out, cum, L: cum[cum.length - 1] };
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  return { pts, cum, L: cum[cum.length - 1] };
 }
-const cv = (x, z, cx, cz) => Object.assign([x, z], { curve: true, c: [cx, cz] });
-const dog = ROADS.find((r) => r.id === 'DOG').o;
-
-const ROUTES = [
-  // scramble approaches
-  { p: [[3, -440], [3, 192]], stops: [[-23, 'z', 'XNS']], n: 5 },
-  { p: [[7, -440], [7, -16], cv(16, -6.5, 7, -6.5), [445, -6.5]], stops: [[-23, 'z', 'XNS'], [186, 'x', 'MB']], n: 4 },
-  { p: [[-3, 192], [-3, -440]], stops: [[23, 'z', 'XNS']], n: 5 },
-  { p: [[-7, 192], [-7, 16], cv(-16, 7.5, -7, 7.5), [-160, 7.5], [-430, 98.5]], stops: [[23, 'z', 'XNS']], n: 4 },
-  { p: [[445, 2.5], [-16, 3.5], [-160, 4], [-430, 95.5]], stops: [[214, 'x', 'MB'], [23, 'x', 'XEW']], n: 6 },
-  { p: [[445, 6.5], [16, 6.5], cv(7, 16, 7, 6.5), [7, 192]], stops: [[214, 'x', 'MB'], [23, 'x', 'XEW']], n: 4 },
-  { p: [[-430, 88.5], [-162, -0.5], [445, -2.5]], stops: [[-23, 'x', 'XEW'], [186, 'x', 'MB']], n: 6 },
-  { p: [[-430, 85.5], [-162, -3.8], [-16, -3.5], cv(-7, -16, -7, -3.5), [-7, -440]], stops: [[-23, 'x', 'XEW']], n: 4 },
-  // Meiji-dori
-  { p: [[203, -470], [203, 580]], stops: [[-15, 'z', 'MA'], [194, 'z', 'RA']], n: 6 },
-  { p: [[207, -470], [207, 580]], stops: [[-15, 'z', 'MA'], [194, 'z', 'RA']], n: 5 },
-  { p: [[197, 580], [197, -470]], stops: [[230, 'z', 'RA'], [15, 'z', 'MA']], n: 6 },
-  { p: [[193, 580], [193, -470]], stops: [[230, 'z', 'RA'], [15, 'z', 'MA']], n: 5 },
-  // Route 246
-  { p: [[-470, 204], [470, 204]], stops: [[186, 'x', 'RB']], n: 6 },
-  { p: [[-470, 208], [470, 208]], stops: [[186, 'x', 'RB']], n: 5 },
-  { p: [[470, 216], [-470, 216]], stops: [[214, 'x', 'RB']], n: 6 },
-  { p: [[470, 220], [-470, 220]], stops: [[214, 'x', 'RB']], n: 5 },
-  // Shuto Expressway (elevated)
-  { p: [[-470, 206.5], [470, 206.5]], y: 15, v: 19, n: 8 },
-  { p: [[470, 217.5], [-470, 217.5]], y: 15, v: 19, n: 8 },
+function lane(line, off) {
+  const p = smoothPts(line, 3), out = [];
+  for (let i = 0; i < p.length; i++) {
+    const a = p[Math.max(0, i - 1)], b = p[Math.min(p.length - 1, i + 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const dx = (b[0] - a[0]) / L, dz = (b[1] - a[1]) / L;
+    out.push([p[i][0] + dz * off, p[i][1] - dx * off]);
+  }
+  return out;
+}
+const L_ = ROAD_LINES;
+const BUN = [...L_.BUN, ...L_.EW.filter(([x]) => x > -60)];
+const NSX = [...L_.NS, [2, 200], [0, 252], ...L_.R246.filter(([x]) => x > 50)];
+// junctions: signal group + stop distance before the centre (the scramble uses its painted stop lines)
+const JUNC = [
+  { x: 0, z: 2, scr: true }, { x: 165, z: 0, sig: ['MA', 'MB'], d: 16 }, { x: 242, z: 152, sig: ['RA', 'RB'], d: 18 },
 ];
-void dog;
-
+const two = (line, lanes, n, o = {}) => {
+  const out = [];
+  for (const dir of [1, -1]) for (const off of lanes) out.push({ p: lane(dir > 0 ? line : line.slice().reverse(), off), n, ...o });
+  return out;
+};
+const ROUTES = [
+  ...two(L_.EW, [1.75, 5.1], 5, { ns: false }),
+  ...two(BUN, [1.75], 4, { ns: false }),
+  ...two(NSX, [1.75], 4, { ns: true }),
+  ...two(L_.MEIJI, [1.75, 5.1], 5, { meiji: true }),
+  ...two(L_.R246, [1.75, 5.1], 5, { r246: true }),
+  ...two(L_.R246, [1.8, 5.2], 7, { y: 14.55, v: 19, shuto: true }),
+];
 export class Traffic {
-  constructor(scene0, mobile) {
+  constructor(scene0, mobile, ground = () => 0) {
     const scene = (this.group = new THREE.Group()); scene0.add(scene);
     this.meshes = {};
     const MAT = {
@@ -160,18 +152,20 @@ export class Traffic {
     this.lightMat = new THREE.MeshBasicMaterial({ vertexColors: true });
     const cap = mobile ? 0.7 : 1;
     this.routes = ROUTES.map((r) => ({ ...r, ...poly(r.p), y: r.y || 0, v: r.v || 11, n: Math.max(2, Math.round(r.n * cap)), veh: [] }));
+    this.ground = ground;
     for (const r of this.routes) {
-      r.stopS = (r.stops || []).map(([v, axis, sig]) => {
-        // arc-length where the route crosses the stop coordinate
-        for (let i = 1; i < r.pts.length; i++) {
-          const a = r.pts[i - 1], b = r.pts[i], k = axis === 'x' ? 0 : 1;
-          if ((a[k] - v) * (b[k] - v) <= 0 && a[k] !== b[k]) {
-            const t = (v - a[k]) / (b[k] - a[k]);
-            return { s: r.cum[i - 1] + t * (r.cum[i] - r.cum[i - 1]), sig };
-          }
-        }
-        return null;
-      }).filter(Boolean);
+      r.stopS = [];
+      if (r.shuto) continue;
+      const near = (x, z) => { let best = 1e9, bs = 0; for (let i = 1; i < r.pts.length; i++) { const d = Math.hypot(r.pts[i][0] - x, r.pts[i][1] - z); if (d < best) { best = d; bs = r.cum[i]; } } return [best, bs]; };
+      for (const J of JUNC) {
+        const [dJ, sJ] = near(J.x, J.z);
+        if (dJ > 14) continue;
+        if (J.scr) {
+          let best = null;
+          for (const k in SCRAMBLE_STOP) { const [d, sp] = near(...SCRAMBLE_STOP[k]); if (d < 9 && sp < sJ && (!best || sp > best.s)) best = { s: sp, sig: k === 'N' || k === 'S' ? 'XNS' : 'XEW' }; }
+          if (best) r.stopS.push(best);
+        } else r.stopS.push({ s: sJ - J.d, sig: r.meiji ? J.sig[0] : J.sig[1] });
+      }
     }
     const counts = {}; const vehicles = [];
     for (const r of this.routes) {
@@ -222,7 +216,7 @@ export class Traffic {
   }
 
   update(dt, now, night, opt = {}) {
-    const RAD2 = opt.radius ? opt.radius * opt.radius : 0, ground = opt.ground, Z = new THREE.Vector3(0, 0, 0);
+    const RAD2 = opt.radius ? opt.radius * opt.radius : 0, ground = opt.ground || this.ground, Z = new THREE.Vector3(0, 0, 0);
     const S = this.sigState(now);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), ax = new THREE.Vector3(0, 1, 0);
     for (const r of this.routes) {
@@ -248,7 +242,7 @@ export class Traffic {
         const [x, z, h] = this.at(r, v.s);
         q.setFromAxisAngle(ax, h);
         const out = RAD2 && (r.y > 0 || x * x + z * z > RAD2);
-        m4.compose(p.set(x, r.y + 0.02 + (ground && !out ? ground(x, z) : 0), z), q, out ? Z : sc);
+        m4.compose(p.set(x, 0.02 + (r.y > 0 ? r.y : out ? 0 : ground(x, z)), z), q, out ? Z : sc);
         const ms = this.meshes[v.type];
         for (const k of ['paint', 'glass', 'dark', 'rim', 'lights']) ms[k].setMatrixAt(v.idx, m4);
       }
@@ -275,16 +269,17 @@ export class Traffic {
       [['g', -0.38], ['y', 0], ['r', 0.38]].forEach(([k, dx]) => {
         const l = new THREE.Mesh(lampGeo, this.sigMats[grp][k]); l.position.set(armLen - 0.3 + dx, 5.9, 0.15); g.add(l);
       });
-      g.position.set(x, 0, z); g.rotation.y = ry;
+      g.position.set(x, this.ground(x, z), z); g.rotation.y = ry;
       scene.add(g);
     };
-    // scramble (signals stand beyond the intersection facing the approach; arm reaches over the lanes)
-    carSignal(12, 25, Math.PI, 'XNS', 6); carSignal(-12, -25, 0, 'XNS', 6);
-    carSignal(-25, 12, Math.PI / 2, 'XEW', 6); carSignal(25, -12, -Math.PI / 2, 'XEW', 6);
-    carSignal(212, 15, Math.PI, 'MA', 5); carSignal(188, -15, 0, 'MA', 5);
-    carSignal(186, 12, Math.PI / 2, 'MB', 5); carSignal(214, -12, -Math.PI / 2, 'MB', 5);
-    carSignal(212, 230, Math.PI, 'RA', 5); carSignal(188, 194, 0, 'RA', 5);
-    carSignal(214, 200, -Math.PI / 2, 'RB', 5); carSignal(186, 224, Math.PI / 2, 'RB', 5);
+    // far-side signals at the real Scramble corners; arms reach over the approaching lanes
+    carSignal(8, 23.5, Math.PI, 'XNS', 7); carSignal(-2, -25, 0, 'XNS', 6);
+    carSignal(-31, 10, Math.PI / 2, 'XEW', 7); carSignal(28, -7, -Math.PI / 2, 'XEW', 7);
+    // Meiji-dori x Miyamasuzaka, Meiji-dori x Route 246
+    carSignal(176, 16, Math.PI, 'MA', 6); carSignal(152, -18, 0, 'MA', 6);
+    carSignal(150, 12, Math.PI / 2, 'MB', 6); carSignal(182, -12, -Math.PI / 2, 'MB', 6);
+    carSignal(250, 168, Math.PI, 'RA', 6); carSignal(232, 136, 0, 'RA', 6);
+    carSignal(226, 160, Math.PI / 2, 'RB', 6); carSignal(258, 144, -Math.PI / 2, 'RB', 6);
     // pedestrian signals
     const pc = canvas(64, 128), g = pc.getContext('2d');
     g.fillStyle = '#111'; g.fillRect(0, 0, 64, 128);
@@ -306,13 +301,14 @@ export class Traffic {
       gg.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.1, 0.25).translate(0, 3.0, 0), housing));
       const a = new THREE.Mesh(topG, this.pedRed); a.position.set(0, 3.27, 0.13); gg.add(a);
       const b = new THREE.Mesh(botG, this.pedGreen); b.position.set(0, 2.73, 0.13); gg.add(b);
-      gg.position.set(x, 0, z); gg.rotation.y = ry; scene.add(gg);
+      gg.position.set(x, this.ground(x, z), z); gg.rotation.y = ry; scene.add(gg);
     };
-    // each corner faces across both of its crosswalks
-    pedSignal(-11, -13, Math.PI / 2); pedSignal(-13, -11, 0);
-    pedSignal(11, -13, -Math.PI / 2); pedSignal(13, -11, 0);
-    pedSignal(11, 13, -Math.PI / 2); pedSignal(13, 11, Math.PI);
-    pedSignal(-11, 13, Math.PI / 2); pedSignal(-13, 11, Math.PI);
+    // one at each end of every crosswalk, facing the people waiting at the other end
+    for (const c of CROSSWALKS) {
+      const [ax, az] = c.a, [bx, bz] = c.b, L = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / L, dz = (bz - az) / L, o = c.w / 2 + 0.4;
+      pedSignal(ax - dx * 0.8 + dz * o, az - dz * 0.8 - dx * o, Math.atan2(dx, dz));
+      pedSignal(bx + dx * 0.8 - dz * o, bz + dz * 0.8 + dx * o, Math.atan2(-dx, -dz));
+    }
   }
 
   updateSignals(S, now) {

@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng } from './util.js';
-import { scramblePhase, JR, GZ, CENTER_GAI } from './layout.js';
-import { toWorld } from './util.js';
+import { scramblePhase, CORNERS, WALKS, HACHIKO, YAMA, JR_PLAT, GINZA, at } from './geo.js';
 
 const R = rng(1234);
 const TOPS = [0x1b1b1d, 0x22324a, 0x3b3b3e, 0xe9e7e2, 0xc8b89c, 0x7d6b55, 0x5c6b4a, 0x8a1f2b, 0x2f5d8c, 0xf2f2f2, 0x111111, 0x6b7f99, 0xd9a3b5, 0xa49480];
@@ -10,30 +9,15 @@ const BOTS = [0x1a1a1c, 0x24324a, 0x3d4f6b, 0x2b2b2e, 0xc7b79a, 0x55555a, 0x1111
 const SKIN = [0xf1d2b6, 0xe8c4a2, 0xdcb08c, 0xf5dcc6];
 const HAIR = [0x141210, 0x1d1712, 0x2b2017, 0x4a3524, 0x7a5a3a, 0xb59b7a];
 
-// corners of the scramble: wait areas + arms (polylines outwards)
-const C = {
-  NW: { area: [-19, -22, -11, -7], arms: [[[-15, -18], [-16, -25], toWorld(CENTER_GAI, -CENTER_GAI.hw + 30, 0), toWorld(CENTER_GAI, CENTER_GAI.hw - 10, 0)], [[-12, -24], [-12, -110], [-12, -190]], [[-22, -8], [-90, -8], [-150, -8]]] },
-  NE: { area: [11, -21, 19, -10], arms: [[[12, -24], [12, -100], [12, -168]], [[22, -12], [95, -12], [180, -12]]] },
-  SE: { area: [11, 10, 24, 21], arms: [[[24, 22], [55, 31], [79, 43.5], [90, 43.5], [102, 50], [104, 98]], [[24, 11.5], [78, 11.2], [180, 11.2]], [[14, 24], [12, 60], [12, 140]]] },
-  SW: { area: [-19, 11, -11, 23], arms: [[[-12, 24], [-12, 110], [-12, 190]], [[-22, 12], [-90, 12], [-150, 12]]] },
-};
+// corners of the scramble: wait areas + arms (polylines outwards along the real sidewalks)
+const C = CORNERS;
 const KEYS = Object.keys(C);
-// ambient ping-pong paths
+// ambient ping-pong paths on real streets (y: fixed height instead of the street surface)
 const AMB = [
-  { pts: [toWorld(CENTER_GAI, -CENTER_GAI.hw + 30, 0), toWorld(CENTER_GAI, CENTER_GAI.hw - 5, 0)], w: 3.5, n: 70 },
-  { pts: [[187.5, -440], [187.5, 180]], w: 1.2, n: 20 }, { pts: [[212.5, -440], [212.5, 180]], w: 1.2, n: 20 },
-  { pts: [[-160, 12], [-300, 63], [-420, 95]], w: 1.5, n: 14 },
-  { pts: [[-8, -192], [-80, -310], [-185, -470]], w: 1.5, n: 18 },
-  { pts: [[150, -150], [150, -380]], w: 14, n: 40, y: 17 },
-  { pts: [[-12, -100], [-150, -100], [-300, -100]], w: 1.2, n: 14 },
-  { pts: [[-460, 196], [460, 196]], w: 1.2, n: 18 }, { pts: [[-460, 228], [460, 228]], w: 1.2, n: 14 },
-  { pts: [[237, 110], [237, 190]], w: 1.2, n: 8 },
-  { pts: [[150, 24], [178, 24], [178, 80], [150, 80], [150, 24]], w: 2, n: 18, y: 229.7, slow: 0.6 },
-  { pts: [[84, 20], [95, 20], [95, 125]], w: 3, n: 20 },
-  { pts: [[-12, 120], [-12, 192]], w: 1.2, n: 6 }, { pts: [[12, 140], [12, 192]], w: 1.2, n: 6 },
-  { pts: [[38, 30], [70, 70], [30, 82], [40, 40]], w: 3, n: 16 },
+  ...WALKS.map((pts, i) => ({ pts, w: i === 0 ? 2.2 : 1.0, n: i === 0 ? 80 : i === 7 ? 26 : 12 })), // [0] Center Gai, [7] Hachiko square
+  { pts: [[90, -270], [95, -200], [110, -170]], w: 5, n: 18, y: 15.75 }, // Miyashita Park rooftop
+  { pts: [[134, 112], [160, 101], [176, 128], [148, 142], [134, 112]], w: 2, n: 18, y: 228.4, slow: 0.6 }, // SHIBUYA SKY
 ];
-
 export class Crowd {
   constructor(scene0, mobile) {
     const scene = (this.group = new THREE.Group()); scene0.add(scene);
@@ -108,7 +92,7 @@ export class Crowd {
       else if (i < NC + NA) {
         p.kind = 'amb';
         const a = ambList[i - NC];
-        p.amb = a; p.y = (a.y || 0) + 0.02; p.sp *= a.slow || 1;
+        p.amb = a; p.y = (a.y || 0) + 0.02; p.fixedY = !!a.y; p.sp *= a.slow || 1;
         const o = R.range(-a.w, a.w);
         const [x0, z0] = a.pts[0], [x1, z1] = a.pts[1], L = Math.hypot(x1 - x0, z1 - z0);
         const nx = -(z1 - z0) / L, nz = (x1 - x0) / L;
@@ -121,16 +105,15 @@ export class Crowd {
       } else {
         p.kind = 'stand';
         const which = R();
-        if (which < 0.62) { // JR platform
-          const side = R() < 0.5;
-          p.x = side ? R.range(105.2, 106.6) : R.range(113.4, 114.8); p.z = R.range(-100, 60); p.y = JR.plat + 0.02;
-          p.th = side ? -Math.PI / 2 : Math.PI / 2;
-        } else if (which < 0.82) {
-          const side = R() < 0.5;
-          p.x = side ? R.range(195, 196.5) : R.range(203.5, 205); p.z = R.range(-115, -35); p.y = GZ.plat + 0.02; p.th = side ? -Math.PI / 2 : Math.PI / 2;
-        } else { // Hachiko meeting spot
-          const a = R() * 6.28, r = R.range(2.5, 7);
-          p.x = 62 + Math.cos(a) * r; p.z = 40 + Math.sin(a) * r; p.th = R() * 6.28;
+        if (which < 0.55) { // JR Yamanote platform (open-air part), facing the tracks
+          const side = R() < 0.5 ? -1 : 1, q = at(YAMA, R.range(JR_PLAT.s0 + 4, JR_PLAT.open - 4)), l = side * R.range(JR_PLAT.half - 1.6, JR_PLAT.half - 1.0);
+          p.x = q.x + q.dz * l; p.z = q.z - q.dx * l; p.y = JR_PLAT.y + 0.02; p.fixedY = true; p.th = q.h + side * Math.PI / 2;
+        } else if (which < 0.75) { // Ginza Line platform
+          const side = R() < 0.5 ? -1 : 1, q = at(GINZA.centre, R.range(GINZA.s0 + 4, GINZA.s1 - 4)), l = side * R.range(GINZA.half - 1.6, GINZA.half - 1.0);
+          p.x = q.x + q.dz * l; p.z = q.z - q.dx * l; p.y = GINZA.plat + 0.02; p.fixedY = true; p.th = q.h + side * Math.PI / 2;
+        } else { // meeting spot around Hachiko
+          const a = R() * 6.28, r = R.range(2.2, 6);
+          p.x = HACHIKO.x + 3 + Math.cos(a) * r; p.z = HACHIKO.z + Math.sin(a) * r; p.th = R() * 6.28; p.y = 0.02;
         }
         p.state = 'stand';
       }
@@ -197,7 +180,7 @@ export class Crowd {
       }
       // write matrices
       if (RAD2 && (p.kind === 'stand' || (p.amb && p.amb.y) || p.x * p.x + p.z * p.z > RAD2)) { this.hide(arr, i); continue; }
-      const gy = ground ? ground(p.x, p.z) : 0;
+      const gy = !p.fixedY && ground ? ground(p.x, p.z) : 0;
       const near = (p.x - cx) * (p.x - cx) + (p.z - cz) * (p.z - cz) < 170 * 170;
       const c = Math.cos(p.th), s = Math.sin(p.th), sc = p.sc, L = p.look;
       let hipL, hipR, kneeL, kneeR, shL, shR, elL, elR, bob;

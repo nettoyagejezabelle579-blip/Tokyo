@@ -1,48 +1,35 @@
-import { ROADS, CENTER_GAI, HACHIKO, JR, GZ, ginzaAt, GINZA_PORTAL_S, TRAVEL, ZONES, scramblePhase } from './layout.js';
-import { toWorld, toLocal } from './util.js';
+import { TRAVEL, ZONES, MAP, scramblePhase } from './geo.js';
 import { hhmm, hhmmss, dateLabel, serviceDay } from './time.js';
 import { departures, LINES } from './timetable.js';
 
 const $ = (id) => document.getElementById(id);
-const MAP = { x0: -480, z0: -490, x1: 480, z1: 600 };
 
 export class Hud {
-  constructor(world, onTravel) {
-    this.world = world; this.onTravel = onTravel;
+  constructor(onTravel) {
+    this.onTravel = onTravel;
     this.base = this.drawBase();
     this.mini = $('mini'); this.mg = this.mini.getContext('2d');
     this.lastSlow = 0;
     this.zone = '';
     this.buildMap();
   }
+  // Minimap base: GSI aerial photo (1 m per pixel) with street labels
   drawBase() {
     const W = MAP.x1 - MAP.x0, H = MAP.z1 - MAP.z0;
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d');
-    const X = (x) => x - MAP.x0, Z = (z) => z - MAP.z0;
-    g.fillStyle = '#d9d4cb'; g.fillRect(0, 0, W, H);
-    const fillObb = (o, col, pad = 0) => {
-      const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => toWorld(o, a * (o.hw + pad), b * (o.hd + pad)));
-      g.fillStyle = col; g.beginPath(); pts.forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)))); g.fill();
+    g.fillStyle = '#6d6f72'; g.fillRect(0, 0, W, H);
+    const img = new Image();
+    img.onload = () => {
+      g.drawImage(img, 0, 0, W, H);
+      g.fillStyle = 'rgba(10,12,16,0.12)'; g.fillRect(0, 0, W, H);
+      const X = (x) => x - MAP.x0, Z = (z) => z - MAP.z0;
+      g.font = '700 15px "Noto Sans JP",sans-serif'; g.textAlign = 'center';
+      const lab = [['スクランブル交差点', -2, -2], ['ハチ公', 8, 62], ['JR渋谷駅', 104, 118], ['センター街', -70, -60], ['SHIBUYA109', -132, -14], ['ヒカリエ', 285, 50], ['スクランブルスクエア', 156, 150], ['宮下公園', 112, -238], ['渋谷ストリーム', 238, 262], ['マークシティ', -150, 140], ['QFRONT', -14, -46], ['西武', 30, -120], ['明治通り', 170, -160], ['国道246号', -60, 300], ['道玄坂', -210, 50], ['文化村通り', -215, -90], ['宮益坂', 330, -60], ['銀座線', 200, 25], ['セルリアンタワー', -100, 360]];
+      for (const [t, x, z] of lab) { g.strokeStyle = 'rgba(0,0,0,0.75)'; g.lineWidth = 4; g.strokeText(t, X(x), Z(z)); g.fillStyle = '#fff'; g.fillText(t, X(x), Z(z)); }
+      const mi = document.getElementById('mapImg'); if (mi) mi.src = c.toDataURL('image/jpeg', 0.85);
     };
-    for (const r of ROADS) fillObb(r.o, '#f6f3ee', 4);
-    for (const r of ROADS) fillObb(r.o, '#9c9a97');
-    fillObb(CENTER_GAI, '#c98f6f');
-    fillObb(HACHIKO, '#c9b49a');
-    g.fillStyle = '#7fb0c9'; g.fillRect(X(222), Z(60), 12, 530);
-    g.fillStyle = '#9cc285'; g.fillRect(X(130), Z(-390), 40, 250);
-    for (const f of this.world.foot) fillObb(f.o, f.h > 90 ? '#4a4f57' : f.h > 40 ? '#6d727a' : '#8b8f95');
-    // rails
-    g.strokeStyle = '#2f8a2f'; g.lineWidth = 3; g.setLineDash([10, 6]);
-    g.beginPath(); g.moveTo(X(JR.outX), 0); g.lineTo(X(JR.outX), H); g.moveTo(X(JR.inX), 0); g.lineTo(X(JR.inX), H); g.stroke();
-    g.strokeStyle = '#f39700';
-    g.beginPath();
-    for (let s = 0; s <= GINZA_PORTAL_S; s += 4) { const [x, z] = ginzaAt(s); s ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)); }
-    g.stroke(); g.setLineDash([]);
-    // labels
-    g.font = '700 13px "Noto Sans JP",sans-serif'; g.fillStyle = '#1b1d21'; g.textAlign = 'center';
-    const lab = [['スクランブル', 0, -2], ['ハチ公', 50, 55], ['JR渋谷駅', 112, 150], ['センター街', -120, -55], ['109', -172, 6], ['ヒカリエ', 252, -55], ['スクランブルスクエア', 163, 100], ['宮下公園', 150, -280], ['ストリーム', 262, 205], ['サクラステージ', 55, 375], ['フクラス', 47, 172], ['マークシティ', -80, 74], ['PARCO', -120, -330], ['西武', 30, -118], ['明治通り', 200, 300], ['国道246号', -300, 214], ['道玄坂', -300, 80]];
-    for (const [t, x, z] of lab) { g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 3; g.strokeText(t, X(x), Z(z)); g.fillText(t, X(x), Z(z)); }
+    img.src = new URL('../' + MAP.src, import.meta.url).href;
     return c;
   }
   buildMap() {
@@ -56,7 +43,6 @@ export class Hud {
       b.addEventListener('click', () => this.onTravel(t));
       wrap.appendChild(b);
     }
-    $('mapImg').src = this.base.toDataURL();
     const list = $('travelList');
     for (const t of TRAVEL) {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'trow';
@@ -66,12 +52,15 @@ export class Hud {
     }
   }
   zoneAt(p) {
+    const plat = this.onPlatform?.(p);
+    if (plat) return ZONES.find((z) => z[plat]);
+    let best = null, bd = 1e9;
     for (const z of ZONES) {
-      if (z.y0 !== undefined && p.y < z.y0) continue;
-      const [lx, lz] = toLocal(z.o, p.x, p.z);
-      if (Math.abs(lx) <= z.o.hw && Math.abs(lz) <= z.o.hd) return z;
+      if (z.r === undefined || (z.y0 !== undefined && p.y < z.y0)) continue;
+      const d = Math.hypot(p.x - z.x, p.z - z.z);
+      if (d < z.r && d / z.r < bd) { bd = d / z.r; best = z; }
     }
-    return { jp: '渋谷', en: 'Shibuya, Tokyo' };
+    return best || { jp: '渋谷', en: 'Shibuya, Tokyo' };
   }
   update(now, player, rail, offset, sig) {
     const p = player.pos;

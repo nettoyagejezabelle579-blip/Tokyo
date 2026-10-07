@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Phys } from './phys.js';
-import { buildWorld } from './world.js';
+import { City, CityPhys } from './city.js';
+import { buildDetails } from './details.js';
 import { Sky } from './sky.js';
 import { Rail } from './rail.js';
 import { Crowd } from './crowd.js';
@@ -8,7 +9,7 @@ import { Traffic } from './traffic.js';
 import { Player } from './player.js';
 import { Hud } from './hud.js';
 import { Sound } from './audio.js';
-import { TRAVEL, JR, GZ } from './layout.js';
+import { TRAVEL, MAP, YAMA, JR_PLAT, GINZA, at } from './geo.js';
 import { jst, hhmmss } from './time.js';
 import { LINES } from './timetable.js';
 import { smooth } from './util.js';
@@ -49,26 +50,38 @@ async function boot(saved) {
   addEventListener('resize', resize); resize();
 
   const phys = new Phys();
-  const world = buildWorld(scene, phys);
+  const city = new City(scene, { lowTex: mobile });
   const sky = new Sky(scene, renderer);
   post = new Post(renderer, scene, camera);
   applyQuality();
-  const rail = new Rail(scene, world);
+  await city.loadGround();
+  const details = buildDetails(scene, phys, city);
+  const cityPhys = new CityPhys(city, phys);
+  const rail = new Rail(scene, details.boardSpots);
   const crowd = new Crowd(scene, mobile);
-  const traffic = new Traffic(scene, mobile);
-  const player = new Player(camera, renderer.domElement, phys);
+  const traffic = new Traffic(scene, mobile, (x, z) => city.ground(x, z));
+  const player = new Player(camera, renderer.domElement, cityPhys);
+  const ground = (x, z) => city.ground(x, z);
+  // platforms: nearest point on the platform centre line
+  const nearPath = (P, s0, s1, x, z) => { let bd = 1e9; for (let s = s0; s <= s1; s += 2) { const q = at(P, s); const d = Math.hypot(q.x - x, q.z - z); if (d < bd) bd = d; } return bd; };
+  const onPlatform = (p) => {
+    if (Math.abs(p.y - JR_PLAT.y) < 3 && nearPath(YAMA, JR_PLAT.s0, JR_PLAT.s1, p.x, p.z) < JR_PLAT.half + 2) return 'jr';
+    if (Math.abs(p.y - GINZA.plat) < 3 && nearPath(GINZA.centre, GINZA.s0, GINZA.s1, p.x, p.z) < GINZA.half + 2) return 'gz';
+    return null;
+  };
+  for (const t of TRAVEL) {
+    if (t.jr !== undefined) { const q = at(YAMA, JR_PLAT.s0 + t.jr); t.p = [q.x, JR_PLAT.y + 0.05, q.z]; t.yaw = q.h; }
+    else if (t.gz !== undefined) { const q = at(GINZA.centre, GINZA.s0 + t.gz); t.p = [q.x, GINZA.plat + 0.05, q.z]; t.yaw = q.h + Math.PI; }
+    else if (!t.p[1]) t.p[1] = city.ground(t.p[0], t.p[2]) + 0.4;
+  }
   const sound = new Sound();
   let offset = 0; // ms from real time
   const now = () => Date.now() + offset;
-  // ---- world mode: classic procedural city or Google Photorealistic 3D Tiles ----
+  // ---- world mode: real Shibuya (PLATEAU) or Google Photorealistic 3D Tiles ----
   const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } } };
-  let mode = 'classic', pr = null, tilePhys = null, PM = null, prAttrAt = 0;
-  const overlay = { yaw: (+(store.get('shibuya.alignRot') ?? 15)) * Math.PI / 180 };
-  const applyOverlay = () => {
-    const y = mode === 'photo' ? overlay.yaw : 0;
-    for (const g of [crowd.group, traffic.group]) { g.rotation.y = y; }
-  };
-  const groundL = (x, z) => { const c = Math.cos(overlay.yaw), s = Math.sin(overlay.yaw); return pr.ground(x * c + z * s, -x * s + z * c); };
+  let mode = 'real', pr = null, tilePhys = null, PM = null, prAttrAt = 0;
+  const groundL = (x, z) => pr.ground(x, z);
+  const realAttr = '3D都市モデル <b>Project PLATEAU</b> (国土交通省) · 航空写真 <b>国土地理院</b>';
   const urlKey = new URLSearchParams(location.search).get('key');
   if (urlKey) store.set('shibuya.gkey', urlKey);
   $('gkey').value = store.get('shibuya.gkey') || '';
@@ -95,15 +108,14 @@ async function boot(saved) {
       store.set('shibuya.gkey', key);
       try { PM = PM || (await import('./photoreal.js')); } catch (e) { hud.toast('読み込み失敗', 'Could not load the 3D Tiles library: ' + e.message); return; }
       pr = pr || new PM.Photoreal(scene, camera, renderer, mobile);
-      pr.onError = (e) => { hud.toast('Google 3D Tiles に接続できません', `Google 3D Tiles did not load (${String(e?.message || e).slice(0, 120)}). Check the key, that Map Tiles API is enabled, and that this page runs on your own site.`); setMode('classic'); };
+      pr.onError = (e) => { hud.toast('Google 3D Tiles に接続できません', `Google 3D Tiles did not load (${String(e?.message || e).slice(0, 120)}). Check the key, that Map Tiles API is enabled, and that this page runs on your own site.`); setMode('real'); };
       pr.start(key);
       tilePhys = tilePhys || new PM.TilePhys(pr);
       mode = 'photo';
       document.body.classList.add('photo');
-      world.root.visible = false; rail.group.visible = false; sky.farGroup.visible = false; traffic.sigGroup.visible = false;
+      city.root.visible = false; details.root.visible = false; sky.farGroup.visible = false; traffic.sigGroup.visible = false;
       player.phys = tilePhys; player.canFly = true;
       post.aoOn = false;
-      applyOverlay();
       hud.zoneOverride = (p) => {
         let best = null, bd = 70;
         for (const t of PM.PHOTO_TRAVEL) { if (t.fly) continue; const [x, z] = PM.geo(t.ll[0], t.ll[1]); const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; best = t; } }
@@ -113,16 +125,15 @@ async function boot(saved) {
       placePhoto(PM.PHOTO_TRAVEL[0]);
     } else {
       pr?.stop();
-      mode = 'classic';
+      mode = 'real';
       document.body.classList.remove('photo');
-      world.root.visible = true; rail.group.visible = true; sky.farGroup.visible = true; traffic.sigGroup.visible = true;
-      player.phys = phys; player.fly = false; player.canFly = false;
+      city.root.visible = true; details.root.visible = true; sky.farGroup.visible = true; traffic.sigGroup.visible = true;
+      player.phys = cityPhys; player.fly = false; player.canFly = false;
       post.aoOn = true;
-      applyOverlay();
-      $('attr').hidden = true; hud.zoneOverride = null; hud.zone = '';
+      $('attr').hidden = false; $('attr').innerHTML = realAttr; hud.zoneOverride = null; hud.zone = '';
       player.teleport(TRAVEL[0].p, TRAVEL[0].yaw, 0.02);
     }
-    $('wClassic').setAttribute('aria-pressed', String(mode === 'classic')); $('wPhoto').setAttribute('aria-pressed', String(mode === 'photo'));
+    $('wReal').setAttribute('aria-pressed', String(mode === 'real')); $('wPhoto').setAttribute('aria-pressed', String(mode === 'photo'));
     buildTravelList();
   }
 
@@ -140,10 +151,21 @@ async function boot(saved) {
       list.appendChild(b);
     }
   }
-  const hud = new Hud(world, travel);
+  const hud = new Hud(travel);
+  hud.onPlatform = onPlatform;
+  $('attr').hidden = false; $('attr').innerHTML = realAttr;
   if (saved && saved.p) player.teleport(saved.p, saved.h, saved.pitch); else player.teleport(TRAVEL[0].p, TRAVEL[0].yaw, 0.02);
   if (saved && typeof saved.offset === 'number') offset = saved.offset;
   window.claude?.hot?.snapshot?.(() => ({ p: [player.pos.x, player.pos.y, player.pos.z], h: player.h, pitch: player.pitch, offset, mode }));
+  // stream the PLATEAU tiles, nearest first; the walk can start once the area around you is in
+  const startP = saved && saved.p ? saved.p : TRAVEL[0].p;
+  let ready = false;
+  const goReady = () => { if (ready) return; ready = true; $('goBtn').disabled = false; $('goBtn').textContent = 'Start walking'; };
+  city.load(startP, (f) => {
+    if (!ready) $('goBtn').textContent = `Loading real Shibuya… ${Math.round(f * 100)}%`;
+    if (f > 0.5) goReady();
+    if (f >= 1) { goReady(); cityPhys.nearAt.set(1e9, 0, 0); }
+  }).catch((e) => { console.error(e); goReady(); hud.toast('読み込み失敗', 'Part of the 3D city could not be loaded: ' + e.message); });
 
   // ---- UI wiring ----
   const open = (id) => { $(id).hidden = false; player.enabled = false; if (document.pointerLockElement) document.exitPointerLock(); };
@@ -154,7 +176,7 @@ async function boot(saved) {
   $('mini').addEventListener('click', () => open(mode === 'photo' ? 'menu' : 'map'));
   addEventListener('keydown', (e) => {
     if (!$('start').hidden) return;
-    if (e.code === 'KeyM' && mode === 'classic') ($('map').hidden ? open('map') : close('map'));
+    if (e.code === 'KeyM' && mode === 'real') ($('map').hidden ? open('map') : close('map'));
     if (e.code === 'Escape') { if (!$('map').hidden) close('map'); else if ($('menu').hidden && !document.pointerLockElement) open('menu'); else close('menu'); }
     if (e.code === 'KeyE' || e.code === 'Enter') useInteract();
   });
@@ -164,7 +186,6 @@ async function boot(saved) {
     const h = Math.floor(Math.abs(steps) / 2), m = Math.abs(steps) % 2 ? '30' : '00';
     $('offLabel').textContent = `${steps < 0 ? '−' : steps > 0 ? '+' : '±'}${h}:${m} → ${hhmmss(now()).slice(0, 5)}`;
     $('liveBtn').setAttribute('aria-pressed', steps === 0);
-    world.setSeason(jst(now()).mo, jst(now()).d);
   };
   $('offset').addEventListener('input', (e) => setOffset(+e.target.value));
   $('liveBtn').addEventListener('click', () => setOffset(0));
@@ -173,7 +194,7 @@ async function boot(saved) {
   $('qLow').addEventListener('click', () => { quality = 'low'; applyQuality(); });
   $('tRun').addEventListener('click', () => { player.runToggle = !player.runToggle; $('tRun').setAttribute('aria-pressed', player.runToggle); });
   $('tJump').addEventListener('click', () => (player.jumpReq = true));
-  $('wClassic').addEventListener('click', () => setMode('classic'));
+  $('wReal').addEventListener('click', () => setMode('real'));
   $('wPhoto').addEventListener('click', () => setMode('photo'));
   $('gkeySave').addEventListener('click', () => { store.set('shibuya.gkey', $('gkey').value.trim()); setMode('photo'); });
   const toggleFly = () => { if (mode !== 'photo') return; player.fly = !player.fly; player.vy = 0; $('wFly').setAttribute('aria-pressed', String(player.fly)); $('tFly').setAttribute('aria-pressed', String(player.fly)); };
@@ -185,9 +206,6 @@ async function boot(saved) {
     el.addEventListener('pointerdown', () => (player[k] = true));
     for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(ev, () => (player[k] = false));
   }
-  $('alignRot').value = Math.round(overlay.yaw * 180 / Math.PI);
-  $('alignRot').addEventListener('input', (e) => { overlay.yaw = +e.target.value * Math.PI / 180; store.set('shibuya.alignRot', e.target.value); applyOverlay(); });
-  $('alignReset').addEventListener('click', () => { $('alignRot').value = 15; overlay.yaw = 15 * Math.PI / 180; store.set('shibuya.alignRot', '15'); applyOverlay(); });
   $('prompt').addEventListener('click', () => useInteract());
   let curInteract = null;
   function useInteract() {
@@ -197,24 +215,21 @@ async function boot(saved) {
     sound.chime(0.06);
     setTimeout(() => { player.teleport(t.to, t.yaw, t.to[1] > 100 ? -0.3 : 0); $('fade').classList.remove('on'); }, 900);
   }
-  $('goBtn').disabled = false; $('goBtn').textContent = 'Start walking';
   $('goBtn').addEventListener('click', () => {
     $('start').hidden = true; document.body.classList.remove('pre'); player.enabled = true; sound.start();
     if (!mobile) { try { const r = renderer.domElement.requestPointerLock?.(); r?.catch?.(() => {}); } catch { /* optional */ } }
   });
-  if (saved && saved.p) { $('start').hidden = true; document.body.classList.remove('pre'); player.enabled = true; }
+  if (saved && saved.p) { goReady(); $('start').hidden = true; document.body.classList.remove('pre'); player.enabled = true; }
   setOffset(Math.round(offset / 1800000));
 
   // ---- loop ----
   const clock = new THREE.Clock();
-  let screenT = 0, screenIdx = 0, lastDay = '';
+  let screenT = 0, screenIdx = 0;
   const tmpV = new THREE.Vector3();
   function frame() {
     const dt = Math.min(0.05, clock.getDelta());
     const t = now();
     const P = jst(t);
-    const dayKey = `${P.mo}-${P.d}`;
-    if (dayKey !== lastDay) { lastDay = dayKey; world.setSeason(P.mo, P.d); }
     player.update(dt);
     sky.update(t, camera.position, dt, 0.35);
     const night = sky.night;
@@ -227,37 +242,27 @@ async function boot(saved) {
     }
     const photo = mode === 'photo' && pr;
     sky.dir.castShadow = renderer.shadowMap.enabled && night < 0.85;
-    for (const m of world.winMats) m.emissiveIntensity = night * 0.75;
-    for (const m of world.shopMats) m.emissiveIntensity = 0.12 + night * 0.42;
-    for (const m of world.signMats) m.color.setScalar(0.8 - night * 0.1);
-    world.pools.opacity = night * 0.85;
-    for (const m of world.groundMats) m.emissiveIntensity = night * 0.22;
-    world.M.platform.emissiveIntensity = night * 0.35;
-    for (const b of world.beaconMeshes) b.visible = night > 0.3 && (performance.now() % 1500) < 750;
-    world.M.glow.color.setScalar(0.8 + night * 0.6);
-    world.M.ceiling.emissiveIntensity = 0.35 + night * 0.3;
+    city.setNight(night);
+    for (const m of details.platformMats) m.emissiveIntensity = night * 0.3;
+    for (const m of details.lampMats) m.color.setScalar(0.75 + night * 0.5);
+    for (const m of details.signMats) m.color.setScalar(0.85 - night * 0.1);
     rail.setNight(night);
     // big screens: refresh a couple per frame (~8 fps each)
     screenT += dt;
     if (screenT > 0.04) {
       screenT = 0;
-      const sc = world.screens[screenIdx++ % world.screens.length];
+      const sc = details.screens[screenIdx++ % details.screens.length];
       if (!photo && sc && tmpV.set(sc.x, sc.y, sc.z).distanceTo(camera.position) < 900) sc.s.draw(performance.now() / 1000, hhmmss(t).slice(0, 5));
     }
     rail.update(t, dt);
     const hour = P.h + P.mi / 60;
     const density = hour < 1 ? 0.45 : hour < 5 ? 0.12 : hour < 7 ? 0.35 : hour < 10 ? 0.85 : hour < 17 ? 0.9 : hour < 22 ? 1 : 0.7;
-    const sig = crowd.update(dt, t, camera.position, density, photo ? { radius: 110, ground: groundL } : {});
+    const sig = crowd.update(dt, t, camera.position, density, photo ? { radius: 110, ground: groundL } : { ground });
     traffic.update(dt, t, night, photo ? { radius: 110, ground: groundL } : {});
     // events: trains
     const pp = player.pos;
-    let onJR = pp.y > 6 && pp.x > JR.x0 && pp.x < JR.x1 && pp.z > -130 && pp.z < 130;
-    let onGZ = pp.y > 10 && pp.x > 140 && pp.x < 212 && pp.z > -130 && pp.z < -8;
-    if (photo) {
-      // real platform locations (approximate) – announcements play when you are at the station
-      const [jx, jz] = PM.geo(35.6582, 139.7016), [gx, gz] = PM.geo(35.6588, 139.7031);
-      onJR = Math.hypot(pp.x - jx, pp.z - jz) < 90; onGZ = Math.hypot(pp.x - gx, pp.z - gz) < 70;
-    }
+    const plat = onPlatform(pp);
+    const onJR = plat === 'jr' || Math.hypot(pp.x - 45, pp.z - 38) < 25, onGZ = plat === 'gz';
     for (const e of rail.events) {
       const near = e.line === 'ginza' ? onGZ : onJR;
       if (!near) continue;
@@ -270,10 +275,9 @@ async function boot(saved) {
       else if (e.phase === 'melody') sound.melody(0.06);
       else if (e.phase === 'close') sound.doors(0.06);
     }
-    for (const e of player.events) if (e === 'gate') sound.gate();
     // interaction prompt
     curInteract = null;
-    if (!photo) for (const it of world.interact) if (Math.abs(pp.y - it.y) < 3 && Math.hypot(pp.x - it.x, pp.z - it.z) < it.r) curInteract = it;
+    if (!photo) for (const it of details.interact) if (Math.abs(pp.y - it.y) < 3 && Math.hypot(pp.x - it.x, pp.z - it.z) < it.r) curInteract = it;
     const prEl = $('prompt');
     if (curInteract) { prEl.hidden = false; prEl.innerHTML = `<kbd>${mobile ? 'TAP' : 'E'}</kbd>${curInteract.jp}  ·  ${curInteract.en}`; } else prEl.hidden = true;
     // audio mix
@@ -299,13 +303,13 @@ async function boot(saved) {
     hud.update(t, player, rail, offset, sig);
     if (!$('map').hidden) {
       const yd = $('youDot');
-      yd.style.left = ((pp.x + 480) / 960 * 100) + '%'; yd.style.top = ((pp.z + 490) / 1090 * 100) + '%';
+      yd.style.left = ((pp.x - MAP.x0) / (MAP.x1 - MAP.x0) * 100) + '%'; yd.style.top = ((pp.z - MAP.z0) / (MAP.z1 - MAP.z0) * 100) + '%';
     }
     post.render(night, dt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  window.__shibuya = { player, rail, scene, renderer, camera, setOffset, travel, sky, world, post, setMode, get pr() { return pr; } };
+  window.__shibuya = { player, rail, scene, renderer, camera, setOffset, travel, sky, city, details, crowd, traffic, post, setMode, get pr() { return pr; } };
   buildTravelList();
   if (urlKey || (saved && saved.mode === 'photo')) setMode('photo');
 }

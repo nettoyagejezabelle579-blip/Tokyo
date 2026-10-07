@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { trainTex, Board, canvas, toTex, JP, DOT } from './textures.js';
-import { JR, GZ, ginzaAt, GINZA_PORTAL_S } from './layout.js';
+import { YAMA, jrAt, JR_PLAT, GINZA, ginzaAt, at } from './geo.js';
 import { departures, LINES } from './timetable.js';
 import { hhmm } from './time.js';
 
@@ -125,8 +125,9 @@ class Train {
 }
 
 export class Rail {
-  constructor(scene0, world) {
+  constructor(scene0, spots) {
     const scene = (this.group = new THREE.Group()); scene0.add(scene);
+    this._m4 = new THREE.Matrix4(); this._v = new THREE.Vector3(); this._q = new THREE.Quaternion(); this._up = new THREE.Vector3(0, 1, 0); this._one = new THREE.Vector3(1, 1, 1);
     this.scene = scene;
     this.mat = { yamanote: atlas('yamanote'), ginza: atlas('ginza') };
     this.geos = {};
@@ -142,37 +143,34 @@ export class Rail {
     this.status = {};
     this.lastNow = 0;
     this.buildDoors(scene);
-    this.buildBoards(scene, world);
+    this.buildBoards(scene, spots);
   }
 
-  // Platform screen doors: fixed panels + sliding leaves (instanced)
+  // Platform screen doors along the curved platform edges: fixed panels + sliding leaves (instanced)
   buildDoors(scene) {
     const leafGeo = new THREE.BoxGeometry(0.06, 1.25, 0.95).translate(0, 0.625, 0);
     const panelGeo = new THREE.BoxGeometry(0.12, 1.3, 1).translate(0, 0.65, 0);
     const mk = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.1 });
     this.psd = [];
+    const jrDoors = [], gzDoors = [], Y = SPEC.yamanote, G = SPEC.ginza;
+    for (let i = 0; i < Y.cars; i++) for (const f of Y.doors) jrDoors.push(JR_PLAT.s0 + 3 + Y.len * i + Y.len / 2 + (f - 0.5) * (Y.len - 0.5));
+    for (let i = 0; i < G.cars; i++) for (const f of G.doors) gzDoors.push(GINZA.s0 + 2 + G.len * i + G.len / 2 + (f - 0.5) * (G.len - 0.5));
     const sets = [
-      { line: 'yamaOuter', x: JR.platX0 + 0.15, y: JR.plat, z0: JR.platZ0, z1: JR.platZ1, stop: (i) => -97 + 20 * i, n: 11, offs: [-7.6, -2.6, 2.6, 7.6], col: 0x80c241 },
-      { line: 'yamaInner', x: JR.platX1 - 0.15, y: JR.plat, z0: JR.platZ0, z1: JR.platZ1, stop: (i) => 102 - 20 * i, n: 11, offs: [-7.6, -2.6, 2.6, 7.6], col: 0x80c241 },
-      { line: 'ginzaW', x: GZ.platX0 + 0.15, y: GZ.plat, z0: GZ.platZ0, z1: GZ.platZ1, stop: (i) => -32 - 16 * i, n: 6, offs: [-5.44, 0, 5.44], col: 0xf39700 },
-      { line: 'ginzaE', x: GZ.platX1 - 0.15, y: GZ.plat, z0: GZ.platZ0, z1: GZ.platZ1, stop: (i) => -32 - 16 * i, n: 6, offs: [-5.44, 0, 5.44], col: 0xf39700 },
+      { line: 'yamaOuter', P: YAMA, lat: -(JR_PLAT.half - 0.15), y: JR_PLAT.y, s0: JR_PLAT.s0, s1: JR_PLAT.s1, open: jrDoors, col: 0x80c241 },
+      { line: 'yamaInner', P: YAMA, lat: JR_PLAT.half - 0.15, y: JR_PLAT.y, s0: JR_PLAT.s0, s1: JR_PLAT.s1, open: jrDoors, col: 0x80c241 },
+      { line: 'ginzaA', P: GINZA.centre, lat: GINZA.half - 0.15, y: GINZA.plat, s0: GINZA.s0, s1: GINZA.s1, open: gzDoors, col: 0xf39700 },
+      { line: 'ginzaB', P: GINZA.centre, lat: -(GINZA.half - 0.15), y: GINZA.plat, s0: GINZA.s0, s1: GINZA.s1, open: gzDoors, col: 0xf39700 },
     ];
-    const m4 = new THREE.Matrix4();
     for (const s of sets) {
-      const open = [];
-      for (let i = 0; i < s.n; i++) for (const o of s.offs) open.push(s.stop(i) + o);
-      open.sort((a, b) => a - b);
-      // fixed panels in the gaps
+      const open = s.open.slice().sort((a, b) => a - b);
       const panels = [];
-      let z = s.z0 + 0.5;
+      let z = s.s0 + 0.5;
       for (const oz of open) { for (; z < oz - 1.05; z += 1) panels.push(z + 0.5); z = oz + 1.05; }
-      for (; z < s.z1 - 0.5; z += 1) panels.push(z + 0.5);
+      for (; z < s.s1 - 0.5; z += 1) panels.push(z + 0.5);
       const pm = new THREE.InstancedMesh(panelGeo, mk(0xf0f0ee), panels.length);
-      panels.forEach((pz, i) => pm.setMatrixAt(i, m4.makeTranslation(s.x, s.y, pz)));
-      scene.add(pm);
       const stripe = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 0.12, 1).translate(0, 1.1, 0), mk(s.col), panels.length);
-      panels.forEach((pz, i) => stripe.setMatrixAt(i, m4.makeTranslation(s.x, s.y, pz)));
-      scene.add(stripe);
+      panels.forEach((ps, i) => { const m = this.edgeMat(s, ps); pm.setMatrixAt(i, m); stripe.setMatrixAt(i, m); });
+      scene.add(pm); scene.add(stripe);
       const leaves = new THREE.InstancedMesh(leafGeo, mk(0xdde3e6), open.length * 2);
       scene.add(leaves);
       s.leaves = leaves; s.open = open; s.k = 0; s.target = 0;
@@ -180,17 +178,20 @@ export class Rail {
       this.psd.push(s);
     }
   }
+  edgeMat(s, ps) {
+    const q = at(s.P, ps);
+    return this._m4.compose(this._v.set(q.x + q.dz * s.lat, s.y, q.z - q.dx * s.lat), this._q.setFromAxisAngle(this._up, q.h), this._one);
+  }
   setLeaves(s, k) {
-    const m4 = new THREE.Matrix4();
-    s.open.forEach((oz, i) => {
+    s.open.forEach((os, i) => {
       const off = 0.48 + k * 0.95;
-      s.leaves.setMatrixAt(i * 2, m4.makeTranslation(s.x, s.y, oz - off));
-      s.leaves.setMatrixAt(i * 2 + 1, m4.makeTranslation(s.x, s.y, oz + off));
+      s.leaves.setMatrixAt(i * 2, this.edgeMat(s, os - off));
+      s.leaves.setMatrixAt(i * 2 + 1, this.edgeMat(s, os + off));
     });
     s.leaves.instanceMatrix.needsUpdate = true;
   }
 
-  buildBoards(scene, world) {
+  buildBoards(scene, spots) {
     const mkMesh = (board, w, h, x, y, z, ry) => {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: board.tex }));
       m.position.set(x, y, z); m.rotation.y = ry; scene.add(m);
@@ -201,18 +202,14 @@ export class Rail {
     this.boards = {
       outer: new Board(512, 128), inner: new Board(512, 128), ginza: new Board(512, 128), hall: new Board(1024, 320),
     };
-    for (const z of [-60, 0, 70]) {
-      if (z > 60 && z < 100) continue;
-      mkMesh(this.boards.outer, 4.2, 1.05, JR.platX0 + 1.4, 10.9, z, Math.PI / 2);
-      mkMesh(this.boards.inner, 4.2, 1.05, JR.platX1 - 1.4, 10.9, z + 6, -Math.PI / 2);
+    for (const [x, y, z, ry] of spots.jr || []) {
+      const h = ry - Math.PI, dx = Math.sin(h), dz = Math.cos(h);
+      mkMesh(this.boards.outer, 2.9, 0.72, x - dz * 1.55, y, z + dx * 1.55, ry);
+      mkMesh(this.boards.inner, 2.9, 0.72, x + dz * 1.55, y, z - dx * 1.55, ry);
     }
-    for (const z of [-40, -90]) mkMesh(this.boards.ginza, 4.0, 1.0, 200, GZ.plat + 2.9, z, Math.PI);
-    mkMesh(this.boards.ginza, 4.0, 1.0, 186.3, GZ.plat + 2.4, -17, -Math.PI / 2);
-    const [x, y, z, ry] = world.boardSpots.concourse;
-    mkMesh(this.boards.hall, 6.4, 2.0, x - 0.3, y + 0.6, z, ry);
-    mkMesh(this.boards.hall, 6.4, 2.0, x + 0.15, y + 0.6, z, ry + Math.PI);
-    // outdoor hall board at the Hachiko exit
-    mkMesh(this.boards.hall, 4.8, 1.5, 79.4, 3.3, 66, -Math.PI / 2);
+    for (const [x, y, z, ry] of spots.ginza || []) mkMesh(this.boards.ginza, 3.6, 0.9, x, y, z, ry);
+    // departure board on the Hachiko Gate facade
+    mkMesh(this.boards.hall, 4.8, 1.5, 47.7, 3.4, 40, -Math.PI / 2);
     this.lastBoard = 0;
   }
 
@@ -248,43 +245,45 @@ export class Rail {
     b.tex.needsUpdate = true;
   }
 
-  // Place a train for a departure; returns phase
+  // Place a train for a departure; returns phase. Outer loop runs north on the west track, inner loop south on the east track.
   placeJR(tr, line, dep, now) {
-    const S = tr.S;
+    const S = tr.S, n = S.cars, len = S.len;
     const tArr = dep.t - 35000, tOpen = tArr + 4000, tClose = dep.t - 9000;
-    const outer = line === 'yamaOuter';
-    const zf = outer ? -107 : 112, sgn = outer ? 1 : -1; // outer comes from +z (south) heading north
+    const outer = line === 'yamaOuter', side = outer ? -1 : 1, dir = outer ? -1 : 1;
+    const stop = outer ? JR_PLAT.s0 + 3 : JR_PLAT.s0 + 3 + n * len;
     let front, phase;
-    if (now < tArr) { front = zf + sgn * dist((tArr - now) / 1000, S.a, S.v); phase = 'approach'; }
-    else if (now < dep.t) { front = zf; phase = 'stopped'; }
-    else { front = zf - sgn * dist((now - dep.t) / 1000, S.a, S.v); phase = 'depart'; }
-    const x = outer ? JR.outX : JR.inX, ry = outer ? Math.PI : 0;
+    if (now < tArr) { front = stop - dir * dist((tArr - now) / 1000, S.a, S.v); phase = 'approach'; }
+    else if (now < dep.t) { front = stop; phase = 'stopped'; }
+    else { front = stop + dir * dist((now - dep.t) / 1000, S.a, S.v); phase = 'depart'; }
     let vis = false;
     tr.cars.forEach((c, i) => {
-      const z = front + sgn * (S.len / 2 + S.len * i);
-      c.position.set(x, JR.rail, z); c.rotation.y = ry;
-      c.visible = Math.abs(z) < 890; vis ||= c.visible;
+      const s = front - dir * (len / 2 + len * i);
+      const q = jrAt(Math.max(0, Math.min(YAMA.L, s)), side);
+      c.position.set(q.x, q.y, q.z); c.rotation.y = q.h + (dir < 0 ? Math.PI : 0);
+      c.visible = s > 6 && s < YAMA.L - 6; vis ||= c.visible;
     });
     tr.setOpen(now > tOpen && now < tClose);
     return { phase, vis, open: now > tOpen && now < tClose, tArr };
   }
+  // Ginza Line terminal: trains come out of the Miyamasuzaka portal, stop at the buffer end, and leave again
   placeGinza(tr, dep, now) {
     const S = tr.S;
     const tArr = dep.t - 150000, tOpen = tArr + 6000, tClose = dep.t - 10000;
+    const stop = GINZA.s0 + 2;
     let sS, phase;
-    if (now < tArr) { sS = 2 + dist((tArr - now) / 1000, S.a, S.v); phase = 'approach'; }
-    else if (now < dep.t) { sS = 2; phase = 'stopped'; }
-    else { sS = 2 + dist((now - dep.t) / 1000, S.a, S.v); phase = 'depart'; }
-    const off = dep.idx % 2 === 0 ? 7.5 : -7.5;
+    if (now < tArr) { sS = stop + dist((tArr - now) / 1000, S.a, S.v); phase = 'approach'; }
+    else if (now < dep.t) { sS = stop; phase = 'stopped'; }
+    else { sS = stop + dist((now - dep.t) / 1000, S.a, S.v); phase = 'depart'; }
+    const side = dep.idx % 2 === 0 ? 1 : -1;
     let vis = false;
     tr.cars.forEach((c, i) => {
       const s = sS + S.len / 2 + S.len * i;
-      const [x, z, hd] = ginzaAt(s, off);
-      c.position.set(x, GZ.rail, z); c.rotation.y = hd;
-      c.visible = s < GINZA_PORTAL_S + 6; vis ||= c.visible;
+      const q = ginzaAt(s, side);
+      c.position.set(q.x, GINZA.rail, q.z); c.rotation.y = q.h;
+      c.visible = s < GINZA.portal + 3; vis ||= c.visible;
     });
     tr.setOpen(now > tOpen && now < tClose);
-    return { phase, vis, open: now > tOpen && now < tClose, tArr, track: off > 0 ? 'W' : 'E' };
+    return { phase, vis, open: now > tOpen && now < tClose, tArr, track: side > 0 ? 'A' : 'B' };
   }
 
   update(now, dt) {
@@ -318,7 +317,7 @@ export class Rail {
     {
       const deps = departures('ginza', now - 60000, now + 200000);
       const pool = this.pool.ginza; const used = new Set();
-      const open = { W: false, E: false };
+      const open = { A: false, B: false };
       let st = null;
       for (const d of deps) {
         let tr = pool.find((p) => p.dep === d.t) || pool.find((p) => p.dep === null && !used.has(p));
@@ -335,8 +334,8 @@ export class Rail {
       if (st && (!prev || prev.dep !== st.dep) && st.phase === 'approach') this.events.push({ line: 'ginza', phase: 'announce', dest: st.dest });
       if (st && prev && prev.dep === st.dep && !prev.open && st.open) this.events.push({ line: 'ginza', phase: 'open' });
       if (st && prev && prev.dep === st.dep && prev.open && !st.open) this.events.push({ line: 'ginza', phase: 'close' });
-      this.psd.find((p) => p.line === 'ginzaW').target = open.W ? 1 : 0;
-      this.psd.find((p) => p.line === 'ginzaE').target = open.E ? 1 : 0;
+      this.psd.find((p) => p.line === 'ginzaA').target = open.A ? 1 : 0;
+      this.psd.find((p) => p.line === 'ginzaB').target = open.B ? 1 : 0;
     }
     for (const s of this.psd) {
       if (Math.abs(s.k - s.target) > 1e-3) { s.k += Math.sign(s.target - s.k) * Math.min(Math.abs(s.target - s.k), dt / 2.2); this.setLeaves(s, s.k); }

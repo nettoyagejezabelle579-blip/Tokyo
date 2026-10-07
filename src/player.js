@@ -120,7 +120,6 @@ export class Player {
     this.vel.z += (tz - this.vel.z) * Math.min(1, a * dt);
     const p = this.pos;
     const steps = Math.max(1, Math.ceil(Math.hypot(this.vel.x, this.vel.z) * dt / 0.25));
-    const px = p.x, pz = p.z;
     for (let i = 0; i < steps; i++) {
       p.x += this.vel.x * dt / steps; p.z += this.vel.z * dt / steps;
       this.phys.collide(p, 0.32, 1.7);
@@ -136,11 +135,7 @@ export class Player {
       this.vy -= 22 * dt; p.y += this.vy * dt;
       if (p.y <= f) { p.y = f; this.vy = 0; this.ground = true; } else this.ground = false;
     } else { this.ground = true; this.vy = 0; }
-    // gate crossing beep
     this.events.length = 0;
-    const crossed = (gx) => (px - gx) * (p.x - gx) < 0;
-    if (crossed(92) && p.z > 26 && p.z < 60.5 && p.y < 2) this.events.push('gate');
-    if (crossed(186) && p.z > -20 && p.z < -14 && p.y > 10) this.events.push('gate');
     // camera
     const hs = Math.hypot(this.vel.x, this.vel.z);
     if (this.ground && hs > 0.5) this.bob += hs * dt * 2.2;

@@ -102,9 +102,9 @@ export class Sky {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), c = new THREE.Color();
     let k = 0;
     while (k < N) {
-      const a = R() * Math.PI * 2, r = 500 + Math.pow(R(), 0.7) * 3800;
+      const a = R() * Math.PI * 2, r = 700 + Math.pow(R(), 0.7) * 3600;
       const x = Math.cos(a) * r, z = Math.sin(a) * r + 50;
-      if (x > -480 && x < 480 && z > -490 && z < 600) continue;
+      if (x > -700 && x < 760 && z > -760 && z < 800) continue; // the PLATEAU city covers this
       const w = 12 + R() * 30, d = 12 + R() * 30;
       let h = 6 + Math.pow(R(), 2.6) * 55;
       if (R() < 0.03) h = 80 + R() * 90;

@@ -19,8 +19,8 @@ export class Phys {
   // ramp rises from ya at local -d/2 to yb at +d/2
   ramp(cx, cz, w, d, ya, yb, rot = 0) { const it = { o: obb(cx, cz, w / 2, d / 2, rot), ya, yb }; this._add(this.floors, it); return it; }
 
-  floorAt(x, z, y, step = 0.65) {
-    let best = 0;
+  floorAt(x, z, y, step = 0.65, base = 0) {
+    let best = base;
     for (const f of this.floors.query(x, z)) {
       const [lx, lz] = toLocal(f.o, x, z);
       if (Math.abs(lx) > f.o.hw || Math.abs(lz) > f.o.hd) continue;

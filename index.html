@@ -82,7 +82,7 @@
   .note { font-size: 12px; color: var(--mute); line-height: 1.6; }
   .note a { color: var(--fg); }
   #mapSheet { width: min(980px, 100%); }
-  #mapWrap { position: relative; width: 100%; aspect-ratio: 960 / 1090; max-height: calc(100vh - 140px); margin: 8px auto 0; }
+  #mapWrap { position: relative; width: 100%; aspect-ratio: 1340 / 1440; max-height: calc(100vh - 140px); margin: 8px auto 0; }
   #mapImg { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
   #mapPins { position: absolute; inset: 0; }
   .pin { position: absolute; transform: translate(-50%, -100%); background: var(--ink); color: var(--fg); border: 1px solid var(--led); border-radius: 8px; padding: 3px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; }
@@ -108,7 +108,7 @@
   body.photo #bl { display: none; }
   #attr { right: 12px; bottom: calc(6px + env(safe-area-inset-bottom, 0px)); max-width: min(70vw, 640px); font-size: 10px; color: #fff; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,0.6); text-align: right; line-height: 1.4; }
   #attr b { font-size: 12px; letter-spacing: 0.02em; }
-  body.touch.photo #attr { bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
+  body.touch #attr { bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
   #gkey { flex: 1 1 220px; min-width: 0; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06); color: var(--fg); font: inherit; font-size: 13px; }
   @media (max-width: 640px) {
     #tl { flex-direction: column; gap: 6px; }
@@ -160,7 +160,7 @@
     <div class="trows" id="travelList"></div>
     <h3>World · 表示</h3>
     <div class="row">
-      <button class="chip" id="wClassic" type="button" aria-pressed="true">Classic 3D</button>
+      <button class="chip" id="wReal" type="button" aria-pressed="true">Real Shibuya · PLATEAU</button>
       <button class="chip" id="wPhoto" type="button" aria-pressed="false">Photoreal · Google 3D Tiles</button>
       <button class="chip photoOnly" id="wFly" type="button" aria-pressed="false">Fly</button>
     </div>
@@ -168,12 +168,7 @@
       <input id="gkey" type="password" autocomplete="off" spellcheck="false" placeholder="Google Maps Platform API key" aria-label="Google Maps Platform API key">
       <button class="chip" id="gkeySave" type="button">Use key</button>
     </div>
-    <div class="note">Photoreal mode streams Google's Photorealistic 3D Tiles, the same 3D city you see in Google Earth. It needs your own API key with the <b>Map Tiles API</b> enabled (<a href="https://developers.google.com/maps/documentation/tile/get-api-key" target="_blank" rel="noopener">get a key</a>); Google bills per session after its free monthly quota. The key is stored only in this browser. Run the game from your own site, such as GitHub Pages, because this preview link cannot reach Google. Clocks, signals and train times stay live; trains are drawn only in Classic 3D.</div>
-    <div class="row photoOnly" style="margin-top:8px">
-      <label for="alignRot" class="note" style="min-width:140px">Line up the crowd</label>
-      <input type="range" id="alignRot" min="-60" max="60" step="1" value="15" aria-label="Rotate the simulated crowd and cars">
-      <button class="chip" id="alignReset" type="button">Reset</button>
-    </div>
+    <div class="note">Photoreal mode streams Google's Photorealistic 3D Tiles, the same 3D city you see in Google Earth. It needs your own API key with the <b>Map Tiles API</b> enabled (<a href="https://developers.google.com/maps/documentation/tile/get-api-key" target="_blank" rel="noopener">get a key</a>); Google bills per session after its free monthly quota. The key is stored only in this browser. Run the game from your own site, such as GitHub Pages, because this preview link cannot reach Google. Clocks, signals, trains, crowds and cars stay live on the real streets.</div>
     <h3>Time · 時刻</h3>
     <div class="row">
       <button class="chip" id="liveBtn" type="button" aria-pressed="true">LIVE</button>
@@ -190,7 +185,7 @@
     <h3>Controls</h3>
     <div class="note">Desktop: <b>W A S D</b> walk, <b>Shift</b> run, mouse to look (click to lock), <b>Space</b> jump, <b>E</b> use elevator, <b>M</b> map, <b>Esc</b> menu.<br>Phone: left thumb moves, right thumb looks, RUN toggles running.</div>
     <h3>About the data</h3>
-    <div class="note">Yamanote Line weekday departures are the JR East Shibuya table (2026). Weekend/holiday Yamanote rows and some Ginza Line hours are filled from the published headway for that hour. Scramble signal cycle: 120 s, pedestrians first. Buildings are simplified but placed where they stand: Shibuya Scramble Square 229.7 m, Hikarie 182.5 m, Stream 180 m, Sakura Stage 179 m, Fukuras 103 m. Mt Fuji, Tokyo Tower, Skytree and Shinjuku sit at their real bearings.</div>
+    <div class="note">Yamanote Line weekday departures are the JR East Shibuya table (2026). Weekend/holiday Yamanote rows and some Ginza Line hours are filled from the published headway for that hour. Scramble signal cycle: 120 s, pedestrians first.<br>The city is the real one: every building, road, bridge and street tree within about 700 m of the crossing comes from <b>3D都市モデル（Project PLATEAU）渋谷区</b> by Japan’s Ministry of Land, Infrastructure, Transport and Tourism (MLIT), with the facade photos it was textured from. Crosswalks, rail lines and platforms are placed from PLATEAU rail data and the <b>国土地理院</b> (GSI) aerial photo, which is also the map. Screens, signals, people and trains are drawn by the game. Mt Fuji, Tokyo Tower, Skytree and Shinjuku sit at their real bearings.</div>
   </div>
 </div>
 <div class="modal" id="map" hidden>
@@ -205,7 +200,7 @@
 <div id="start">
   <div style="max-width: 640px; width: 100%">
     <h1 class="title">渋谷<small>SHIBUYA · LIVE</small></h1>
-    <p class="lead">Walk around Shibuya Station on Tokyo’s clock. The Yamanote and Ginza trains arrive and leave on the real timetable, the scramble turns green every two minutes, and the sun sets when it sets in Tokyo.</p>
+    <p class="lead">Walk the real Shibuya, rebuilt from Japan’s official 3D city model, on Tokyo’s clock. The Yamanote and Ginza trains arrive and leave on the real timetable, the scramble turns green every two minutes, and the sun sets when it sets in Tokyo.</p>
     <button class="go" id="goBtn" type="button" disabled>Loading Shibuya…</button>
     <div class="keys"><kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · mouse look · <kbd>M</kbd> map · <kbd>E</kbd> elevator<br>Phone: left thumb walk, right thumb look</div>
   </div>
