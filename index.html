@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Shibuya Live Walk</title>
+<!--PAGE-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=DotGothic16&family=Noto+Sans+JP:wght@400;500;700;900&display=swap">
+<style>
+  /* Layout: full-bleed 3D view, HUD pinned to the four corners, one modal layer on top. */
+  :root {
+    --ink: #0d1015; --panel: rgba(13, 16, 21, 0.74); --line: rgba(255, 255, 255, 0.13);
+    --fg: #f3f0e8; --mute: #a3a9b2; --jr: #80c241; --ginza: #f39700; --led: #ffb02e; --walk: #20e0b0; --stop: #ff4a3a;
+    --display: "Dela Gothic One", "Noto Sans JP", sans-serif; --ui: "Noto Sans JP", "Hiragino Kaku Gothic ProN", system-ui, sans-serif; --dot: "DotGothic16", "Noto Sans JP", monospace;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; background: var(--ink); color: var(--fg); font-family: var(--ui); overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #app { position: fixed; inset: 0; }
+  #app canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .hud { position: fixed; z-index: 5; pointer-events: none; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--led); outline-offset: 2px; }
+
+  #tl { top: calc(12px + env(safe-area-inset-top, 0px)); left: 12px; display: flex; gap: 8px; align-items: flex-start; }
+  #menuBtn { pointer-events: auto; width: 44px; height: 44px; display: grid; place-items: center; cursor: pointer; font-size: 20px; }
+  #loc { padding: 7px 12px 8px; min-width: 0; max-width: 46vw; }
+  #locJp { display: block; font-weight: 900; font-size: 16px; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #locEn { display: block; font-size: 11px; color: var(--mute); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  #tr { top: calc(12px + env(safe-area-inset-top, 0px)); right: 12px; width: 268px; display: flex; flex-direction: column; gap: 8px; }
+  #clockBox { padding: 8px 12px 9px; display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0 8px; }
+  #clock { font-family: var(--dot); font-size: 30px; line-height: 1; color: var(--led); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; text-shadow: 0 0 10px rgba(255, 176, 46, 0.35); }
+  #live { white-space: nowrap; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; padding: 3px 7px; border-radius: 99px; background: #c4161c; color: #fff; align-self: center; }
+  #live[data-live="0"] { background: #6b4a12; }
+  #date { grid-column: 1 / -1; font-size: 11px; color: var(--mute); margin-top: 5px; }
+  #deps { padding: 4px 0; }
+  .dep { display: grid; grid-template-columns: 4px 1fr auto; gap: 10px; padding: 6px 12px 6px 0; align-items: center; }
+  .dep + .dep { border-top: 1px solid var(--line); }
+  .dep i { height: 30px; border-radius: 0 3px 3px 0; }
+  .dl { min-width: 0; } .dl b { display: block; font-size: 12px; } .dl span { display: block; font-size: 11px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dt { text-align: right; } .dt b { display: block; font-family: var(--dot); font-size: 19px; color: var(--led); font-weight: 400; font-variant-numeric: tabular-nums; } .dt span { font-size: 10px; color: var(--mute); }
+
+  #bl { left: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  #mini { display: block; width: 168px; height: 168px; border-radius: 14px; border: 1px solid var(--line); background: #d9d4cb; pointer-events: auto; cursor: pointer; }
+  #sigPill { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); padding: 8px 14px; border-radius: 99px; font-size: 13px; font-weight: 700; background: var(--panel); border: 1px solid var(--line); white-space: nowrap; }
+  #sigPill[data-state="go"] { color: var(--walk); } #sigPill[data-state="blink"] { color: var(--led); } #sigPill[data-state="stop"] { color: var(--stop); }
+  #toast { top: calc(84px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); padding: 10px 16px; text-align: center; max-width: min(560px, calc(100vw - 32px)); }
+  #toast b { display: block; font-size: 14px; } #toast span { display: block; font-size: 11px; color: var(--mute); margin-top: 2px; }
+  #toast.show { animation: pop 0.35s ease-out; }
+  @keyframes pop { from { opacity: 0; transform: translate(-50%, -8px); } }
+  #prompt { left: 50%; top: 58%; transform: translateX(-50%); padding: 10px 16px; font-size: 14px; font-weight: 700; pointer-events: auto; cursor: pointer; border-color: var(--led); }
+  #prompt kbd { font-family: var(--dot); background: var(--led); color: #111; border-radius: 4px; padding: 0 6px; margin-right: 6px; }
+  #cross { left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: rgba(255, 255, 255, 0.7); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+
+  #touchUi { right: 12px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); display: none; gap: 10px; align-items: flex-end; }
+  .tb { pointer-events: auto; width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center; font-weight: 900; font-size: 12px; cursor: pointer; text-align: center; line-height: 1.1; }
+  .tb[aria-pressed="true"] { background: var(--led); color: #111; border-color: var(--led); }
+  #joy { position: fixed; z-index: 6; width: 120px; height: 120px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(13, 16, 21, 0.25); pointer-events: none; }
+  #knob { position: absolute; left: 36px; top: 36px; width: 48px; height: 48px; border-radius: 50%; background: rgba(243, 240, 232, 0.8); }
+  body.touch #touchUi { display: flex; }
+  body.touch #cross { display: none; }
+
+  /* overlays */
+  .modal { position: fixed; inset: 0; z-index: 20; background: rgba(8, 10, 14, 0.62); display: grid; place-items: center; padding: 16px; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  .sheet { width: min(720px, 100%); max-height: calc(100% - 8px); overflow: auto; padding: 18px; background: rgba(16, 19, 25, 0.96); border: 1px solid var(--line); border-radius: 16px; }
+  .sheet h2 { margin: 0 0 4px; font-family: var(--display); font-weight: 400; font-size: 22px; }
+  .sheet h3 { margin: 18px 0 8px; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); }
+  .x { float: right; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: transparent; cursor: pointer; font-size: 18px; }
+  .trows { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+  .trow { text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); cursor: pointer; }
+  .trow:hover { border-color: var(--led); }
+  .trow b { display: block; font-size: 14px; } .trow span { display: block; font-size: 11px; color: var(--mute); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .chip { padding: 8px 12px; border-radius: 99px; border: 1px solid var(--line); background: transparent; cursor: pointer; font-size: 13px; }
+  .chip[aria-pressed="true"] { background: var(--fg); color: var(--ink); }
+  input[type=range] { flex: 1 1 200px; accent-color: var(--led); }
+  #offLabel { font-family: var(--dot); color: var(--led); min-width: 120px; font-variant-numeric: tabular-nums; }
+  .note { font-size: 12px; color: var(--mute); line-height: 1.6; }
+  .note a { color: var(--fg); }
+  #mapSheet { width: min(980px, 100%); }
+  #mapWrap { position: relative; width: 100%; aspect-ratio: 960 / 1090; max-height: calc(100vh - 140px); margin: 8px auto 0; }
+  #mapImg { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
+  #mapPins { position: absolute; inset: 0; }
+  .pin { position: absolute; transform: translate(-50%, -100%); background: var(--ink); color: var(--fg); border: 1px solid var(--led); border-radius: 8px; padding: 3px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .pin small { display: none; } .pin:hover small { display: block; color: var(--mute); }
+  .pin::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 8px; height: 8px; background: var(--led); border-radius: 50%; transform: translateX(-50%); }
+  #youDot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; background: #e8380d; border: 2px solid #fff; border-radius: 50%; }
+
+  /* start screen */
+  #start { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: radial-gradient(120% 90% at 70% 10%, rgba(232, 56, 13, 0.18), transparent 60%), linear-gradient(180deg, rgba(8, 10, 14, 0.35), rgba(8, 10, 14, 0.9)); }
+  .title { font-family: var(--display); font-size: clamp(76px, 20vw, 168px); line-height: 0.9; margin: 0; letter-spacing: -0.02em; }
+  .title small { display: block; font-family: var(--ui); font-weight: 900; font-size: clamp(14px, 3.6vw, 20px); letter-spacing: 0.5em; margin-top: 12px; color: var(--led); }
+  .lead { max-width: 52ch; color: #d6d2c8; line-height: 1.7; font-size: 14px; margin: 18px 0 20px; }
+  .go { padding: 14px 26px; border-radius: 99px; border: 0; background: var(--fg); color: var(--ink); font-weight: 900; font-size: 16px; cursor: pointer; }
+  .go:disabled { opacity: 0.5; cursor: progress; }
+  .keys { margin-top: 18px; font-size: 12px; color: var(--mute); line-height: 1.8; }
+  .keys kbd { font-family: var(--dot); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--fg); }
+  #fade { position: fixed; inset: 0; z-index: 25; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.35s; }
+  #fade.on { opacity: 1; }
+  body.pre .hud, body.pre #joy { visibility: hidden; }
+  @media (max-width: 640px) {
+    #tl { flex-direction: column; gap: 6px; }
+    #tr { width: 190px; gap: 6px; } #clock { font-size: 22px; } #clockBox { padding: 7px 10px; } #date { font-size: 10px; } #live { font-size: 9px; letter-spacing: 0.04em; padding: 3px 6px; }
+    .dl span { display: none; } .dep { padding: 4px 10px 4px 0; gap: 8px; } .dep i { height: 22px; } .dl b { font-size: 11px; } .dt b { font-size: 16px; }
+    #bl { left: 12px; bottom: auto; top: calc(118px + env(safe-area-inset-top, 0px)); }
+    #mini { width: 104px; height: 104px; border-radius: 12px; }
+    #loc { max-width: calc(100vw - 230px); padding: 6px 10px; } #locJp { font-size: 13px; } #locEn { font-size: 9px; }
+    #sigPill { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); font-size: 12px; }
+    #toast { top: auto; bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
+  }
+  @media (prefers-reduced-motion: reduce) { #toast.show { animation: none; } #fade { transition: none; } }
+</style>
+<!--/PAGE-->
+</head>
+<body class="pre">
+<!--BODY-->
+<div id="app"></div>
+<div class="hud" id="tl">
+  <button class="panel" id="menuBtn" type="button" aria-label="Menu">☰</button>
+  <div class="panel" id="loc"><span id="locJp">渋谷</span><span id="locEn">Shibuya, Tokyo</span></div>
+</div>
+<div class="hud" id="tr">
+  <div class="panel" id="clockBox"><div id="clock">--:--:--</div><div id="live" data-live="1">LIVE · JST</div><div id="date"></div></div>
+  <div class="panel" id="deps"></div>
+</div>
+<div class="hud" id="bl"><canvas id="mini" width="336" height="336" aria-label="Minimap, tap for the full map"></canvas></div>
+<div class="hud" id="sigPill" hidden></div>
+<div class="hud panel" id="toast" hidden></div>
+<div class="hud panel" id="prompt" hidden></div>
+<div class="hud" id="cross"></div>
+<div id="joy" hidden><div id="knob"></div></div>
+<div class="hud" id="touchUi">
+  <button class="tb panel" id="tJump" type="button">JUMP</button>
+  <button class="tb panel" id="tRun" type="button" aria-pressed="false">RUN</button>
+</div>
+<div id="fade"></div>
+
+<div class="modal" id="menu" hidden>
+  <div class="sheet" role="dialog" aria-labelledby="menuT">
+    <button class="x" type="button" data-close="menu" aria-label="Close">✕</button>
+    <h2 id="menuT">渋谷 · Menu</h2>
+    <div class="note">Everything runs on Tokyo time (JST). Trains follow the published Shibuya timetable for today’s weekday or 土休日 schedule.</div>
+    <h3>Go to · ワープ</h3>
+    <div class="trows" id="travelList"></div>
+    <h3>Time · 時刻</h3>
+    <div class="row">
+      <button class="chip" id="liveBtn" type="button" aria-pressed="true">LIVE</button>
+      <input type="range" id="offset" min="-48" max="48" step="1" value="0" aria-label="Time offset in 30-minute steps">
+      <span id="offLabel">±0:00</span>
+    </div>
+    <div class="note">Drag to look at another hour (night lights, first trains at 4:37, last Ginza train at 0:02). LIVE snaps back to now.</div>
+    <h3>Settings</h3>
+    <div class="row">
+      <button class="chip" id="sndBtn" type="button" aria-pressed="true">Sound on</button>
+      <button class="chip" id="qHigh" type="button" aria-pressed="true">High quality</button>
+      <button class="chip" id="qLow" type="button" aria-pressed="false">Battery saver</button>
+    </div>
+    <h3>Controls</h3>
+    <div class="note">Desktop: <b>W A S D</b> walk, <b>Shift</b> run, mouse to look (click to lock), <b>Space</b> jump, <b>E</b> use elevator, <b>M</b> map, <b>Esc</b> menu.<br>Phone: left thumb moves, right thumb looks, RUN toggles running.</div>
+    <h3>About the data</h3>
+    <div class="note">Yamanote Line weekday departures are the JR East Shibuya table (2026). Weekend/holiday Yamanote rows and some Ginza Line hours are filled from the published headway for that hour. Scramble signal cycle: 120 s, pedestrians first. Buildings are simplified but placed where they stand: Shibuya Scramble Square 229.7 m, Hikarie 182.5 m, Stream 180 m, Sakura Stage 179 m, Fukuras 103 m. Mt Fuji, Tokyo Tower, Skytree and Shinjuku sit at their real bearings.</div>
+  </div>
+</div>
+<div class="modal" id="map" hidden>
+  <div class="sheet" id="mapSheet" role="dialog" aria-labelledby="mapT">
+    <button class="x" type="button" data-close="map" aria-label="Close">✕</button>
+    <h2 id="mapT">Map · 地図</h2>
+    <div class="note">Tap a pin to go there.</div>
+    <div id="mapWrap"><img id="mapImg" alt="Map of Shibuya around the station"><div id="mapPins"></div><div id="youDot"></div></div>
+  </div>
+</div>
+
+<div id="start">
+  <div style="max-width: 640px; width: 100%">
+    <h1 class="title">渋谷<small>SHIBUYA · LIVE</small></h1>
+    <p class="lead">Walk around Shibuya Station on Tokyo’s clock. The Yamanote and Ginza trains arrive and leave on the real timetable, the scramble turns green every two minutes, and the sun sets when it sets in Tokyo.</p>
+    <button class="go" id="goBtn" type="button" disabled>Loading Shibuya…</button>
+    <div class="keys"><kbd>WASD</kbd> walk · <kbd>Shift</kbd> run · mouse look · <kbd>M</kbd> map · <kbd>E</kbd> elevator<br>Phone: left thumb walk, right thumb look</div>
+  </div>
+</div>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+<script type="module" src="./src/main.js"></script>
+<!--/BODY-->
+</body>
+</html>
